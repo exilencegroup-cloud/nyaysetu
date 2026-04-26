@@ -1,6 +1,5 @@
 import { PdfError } from '../types';
 
-// @ts-ignore - pdf-parse doesn't have TypeScript definitions
 const pdf = require('pdf-parse');
 
 export interface ExtractionResult {
