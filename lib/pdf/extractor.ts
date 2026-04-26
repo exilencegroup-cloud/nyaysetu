@@ -1,8 +1,8 @@
 import { PdfError } from '../types';
-import * as pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
-// Set up worker for server-side
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// Disable worker for server-side environment
+pdfjsLib.GlobalWorkerOptions.workerSrc = '';
 
 export interface ExtractionResult {
   success: boolean;
