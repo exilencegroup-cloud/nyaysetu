@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-const LegalAnalysisSchema = z.object({
+export const LegalAnalysisSchema = z.object({
   snapshot: z.object({
     case_name: z.string(),
     court: z.string(),
