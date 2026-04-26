@@ -13,7 +13,7 @@ export interface ExtractionResult {
 
 export async function extractPdfText(buffer: Buffer): Promise<ExtractionResult> {
   try {
-    const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+    const arrayBuffer = new Uint8Array(buffer);
     const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
     const pdfDocument = await loadingTask.promise;
     
