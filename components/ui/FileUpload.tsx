@@ -94,19 +94,19 @@ export function FileUpload({
             <p className="text-muted text-xs sm:text-sm">PDF only, max 10MB</p>
           </label>
         ) : (
-          <div className="flex items-center justify-between p-3 sm:p-4 bg-background rounded-lg">
-            <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center justify-between p-3 sm:p-4 bg-background rounded-lg w-full overflow-hidden">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
               <div className="p-2 bg-accent/10 rounded-lg flex-shrink-0">
                 <UploadCloud size={20} className="text-accent" />
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-primary font-medium text-xs sm:text-sm truncate">{selectedFile.name}</p>
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <p className="text-primary font-medium text-xs sm:text-sm truncate" title={selectedFile.name}>{selectedFile.name}</p>
                 <p className="text-muted text-xs">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
               </div>
             </div>
             <button
               onClick={handleRemove}
-              className="p-2 hover:bg-primary/5 rounded-lg transition-colors flex-shrink-0"
+              className="p-2 hover:bg-primary/5 rounded-lg transition-colors flex-shrink-0 ml-2"
             >
               <X size={18} className="text-muted" />
             </button>
