@@ -3,22 +3,22 @@ import { LegalAnalysis } from '../types';
 
 const LegalAnalysisSchema = z.object({
   snapshot: z.object({
-    case_name: z.string(),
-    court: z.string(),
-    date: z.string(),
-    judges: z.string(),
-    case_type: z.string(),
+    case_name: z.string().optional(),
+    court: z.string().optional(),
+    date: z.string().optional(),
+    judges: z.string().optional(),
+    case_type: z.string().optional(),
   }),
-  facts: z.array(z.string()),
-  legal_issues: z.array(z.string()),
+  facts: z.array(z.string()).optional(),
+  legal_issues: z.array(z.string()).optional(),
   arguments: z.object({
-    petitioner: z.array(z.string()),
-    respondent: z.array(z.string()),
-  }),
-  court_reasoning: z.array(z.string()),
-  outcome: z.string(),
-  key_takeaways: z.array(z.string()),
-  reusable_arguments: z.array(z.string()),
+    petitioner: z.array(z.string()).optional(),
+    respondent: z.array(z.string()).optional(),
+  }).optional(),
+  court_reasoning: z.array(z.string()).optional(),
+  outcome: z.string().optional(),
+  key_takeaways: z.array(z.string()).optional(),
+  reusable_arguments: z.array(z.string()).optional(),
 });
 
 export function validateAnalysis(data: unknown): LegalAnalysis {
