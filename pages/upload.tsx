@@ -57,18 +57,18 @@ export default function Upload() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 py-8 sm:py-12">
-      <div className="max-w-2xl w-full">
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 sm:px-6 py-8 sm:py-12">
+      <div className="w-full max-w-xl sm:max-w-2xl">
         <div className="text-center mb-6 sm:mb-8">
-          <h1 className="text-2xl sm:text-3xl font-serif font-bold text-primary mb-2">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-serif font-bold text-primary mb-2">
             Upload Judgment
           </h1>
-          <p className="text-sm sm:text-base text-secondary">
+          <p className="text-xs sm:text-sm md:text-base text-secondary px-2">
             Upload a court judgment PDF to extract structured legal intelligence
           </p>
         </div>
 
-        <div className="bg-card rounded-card shadow-card p-6 sm:p-8">
+        <div className="bg-card rounded-card shadow-card p-4 sm:p-6 md:p-8">
           {state === 'idle' && (
             <>
               <FileUpload onFileSelect={handleFileSelect} />
@@ -83,28 +83,28 @@ export default function Upload() {
           )}
 
           {state === 'uploading' && (
-            <div className="flex flex-col items-center justify-center py-8 sm:py-12">
+            <div className="flex flex-col items-center justify-center py-6 sm:py-8 md:py-12">
               <Loader size="lg" color="accent" />
-              <p className="mt-4 text-secondary text-sm sm:text-base">Analyzing document...</p>
+              <p className="mt-4 text-secondary text-xs sm:text-sm md:text-base">Analyzing document...</p>
             </div>
           )}
 
           {state === 'error' && (
-            <div className="flex flex-col items-center justify-center py-8 sm:py-12">
-              <div className="text-red-500 mb-4">
-                <svg width={48} height={48} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <div className="flex flex-col items-center justify-center py-6 sm:py-8 md:py-12 px-2">
+              <div className="text-red-500 mb-3 sm:mb-4">
+                <svg width={40} height={40} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                   <circle cx={12} cy={12} r={10} />
                   <line x1={12} y1={8} x2={12} y2={12} />
                   <line x1={12} y1={16} x2={12.01} y2={16} />
                 </svg>
               </div>
-              <h2 className="text-lg sm:text-xl font-medium text-primary mb-2">Analysis Failed</h2>
-              <p className="text-secondary text-center mb-6 max-w-md text-sm sm:text-base">{error}</p>
-              <div className="flex gap-3 flex-col sm:flex-row w-full sm:w-auto">
-                <Button onClick={handleAnalyze} variant="primary" className="w-full sm:w-auto">
+              <h2 className="text-base sm:text-lg md:text-xl font-medium text-primary mb-2">Analysis Failed</h2>
+              <p className="text-secondary text-center mb-4 sm:mb-6 max-w-md text-xs sm:text-sm md:text-base">{error}</p>
+              <div className="flex gap-2 sm:gap-3 flex-col sm:flex-row w-full">
+                <Button onClick={handleAnalyze} variant="primary" className="w-full">
                   Retry
                 </Button>
-                <Button onClick={handleReset} variant="secondary" className="w-full sm:w-auto">
+                <Button onClick={handleReset} variant="secondary" className="w-full">
                   Upload New
                 </Button>
               </div>
