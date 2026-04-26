@@ -30,8 +30,8 @@ export function Button({
 
   const sizeStyles = {
     sm: 'px-3 py-2 text-xs',
-    md: 'px-6 py-3 text-sm',
-    lg: 'px-8 py-4 text-base',
+    md: 'px-4 sm:px-6 py-2 sm:py-3 text-xs sm:text-sm',
+    lg: 'px-6 sm:px-8 py-3 sm:py-4 text-sm sm:text-base',
   };
 
   return (
