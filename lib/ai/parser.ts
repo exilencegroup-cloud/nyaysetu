@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { LegalAnalysis } from '../types';
 
 const LegalAnalysisSchema = z.object({
   snapshot: z.object({
@@ -20,6 +19,8 @@ const LegalAnalysisSchema = z.object({
   key_takeaways: z.array(z.string()).optional(),
   reusable_arguments: z.array(z.string()).optional(),
 });
+
+export type LegalAnalysis = z.infer<typeof LegalAnalysisSchema>;
 
 export function validateAnalysis(data: unknown): LegalAnalysis {
   return LegalAnalysisSchema.parse(data);
