@@ -2,11 +2,11 @@ import { z } from 'zod';
 
 const LegalAnalysisSchema = z.object({
   snapshot: z.object({
-    case_name: z.string().optional(),
-    court: z.string().optional(),
-    date: z.string().optional(),
-    judges: z.string().optional(),
-    case_type: z.string().optional(),
+    case_name: z.string(),
+    court: z.string(),
+    date: z.string(),
+    judges: z.string(),
+    case_type: z.string(),
   }),
   facts: z.array(z.string()).optional(),
   legal_issues: z.array(z.string()).optional(),
