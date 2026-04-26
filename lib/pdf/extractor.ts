@@ -1,8 +1,7 @@
 import { PdfError } from '../types';
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
-// Disable worker for server-side environment
-pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+// @ts-ignore - pdf-parse doesn't have TypeScript definitions
+const pdf = require('pdf-parse');
 
 export interface ExtractionResult {
   success: boolean;
@@ -13,34 +12,12 @@ export interface ExtractionResult {
 
 export async function extractPdfText(buffer: Buffer): Promise<ExtractionResult> {
   try {
-    const arrayBuffer = new Uint8Array(buffer);
-    console.log('Starting PDF extraction, buffer size:', arrayBuffer.length);
+    console.log('Starting PDF extraction, buffer size:', buffer.length);
     
-    const loadingTask = pdfjsLib.getDocument({ 
-      data: arrayBuffer,
-      cMapUrl: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/cmaps/`,
-      cMapPacked: true,
-      standardFontDataUrl: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/standard_fonts/`,
-      disableAutoFetch: true,
-      disableStream: true
-    });
+    const data = await pdf(buffer);
+    console.log('PDF loaded, numPages:', data.numpages);
     
-    const pdfDocument = await loadingTask.promise;
-    console.log('PDF loaded, numPages:', pdfDocument.numPages);
-    
-    let fullText = '';
-    const numPages = pdfDocument.numPages;
-    
-    for (let i = 1; i <= numPages; i++) {
-      const page = await pdfDocument.getPage(i);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items.map((item: any) => item.str).join(' ');
-      fullText += pageText + '\n';
-    }
-    
-    console.log('Text extracted, length:', fullText.length);
-    
-    if (!fullText || fullText.trim().length === 0) {
+    if (!data.text || data.text.trim().length === 0) {
       return {
         success: false,
         error: 'SCANNED_PDF',
@@ -49,8 +26,8 @@ export async function extractPdfText(buffer: Buffer): Promise<ExtractionResult> 
     
     return {
       success: true,
-      text: fullText,
-      pages: numPages,
+      text: data.text,
+      pages: data.numpages,
     };
   } catch (error: any) {
     console.error('PDF extraction error:', error.message, error.stack);
