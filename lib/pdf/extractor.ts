@@ -1,6 +1,8 @@
 import { PdfError } from '../types';
+import * as pdfjsLib from 'pdfjs-dist';
 
-const pdf = require('pdf-parse');
+// Set up worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 export interface ExtractionResult {
   success: boolean;
@@ -11,9 +13,21 @@ export interface ExtractionResult {
 
 export async function extractPdfText(buffer: Buffer): Promise<ExtractionResult> {
   try {
-    const data = await pdf(buffer);
+    const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdfDocument = await loadingTask.promise;
     
-    if (!data.text || data.text.trim().length === 0) {
+    let fullText = '';
+    const numPages = pdfDocument.numPages;
+    
+    for (let i = 1; i <= numPages; i++) {
+      const page = await pdfDocument.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items.map((item: any) => item.str).join(' ');
+      fullText += pageText + '\n';
+    }
+    
+    if (!fullText || fullText.trim().length === 0) {
       return {
         success: false,
         error: 'SCANNED_PDF',
@@ -22,8 +36,8 @@ export async function extractPdfText(buffer: Buffer): Promise<ExtractionResult> 
     
     return {
       success: true,
-      text: data.text,
-      pages: data.numpages,
+      text: fullText,
+      pages: numPages,
     };
   } catch (error) {
     return {
