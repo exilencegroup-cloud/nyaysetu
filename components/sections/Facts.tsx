@@ -15,11 +15,11 @@ export function Facts({ data }: FactsProps) {
       <SectionHeader icon={List} title="Facts" />
       <ul className="space-y-3">
         {data.map((fact, index) => (
-          <li key={index} className="flex items-start gap-3 text-secondary leading-relaxed">
+          <li key={index} className="flex items-start gap-2 sm:gap-3 text-secondary leading-relaxed text-sm">
             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-accent/10 text-accent text-sm font-medium flex items-center justify-center mt-0.5">
               {index + 1}
             </span>
-            <span>{fact}</span>
+            <span className="break-words">{fact}</span>
           </li>
         ))}
       </ul>

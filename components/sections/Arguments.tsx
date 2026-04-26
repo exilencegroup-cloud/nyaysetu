@@ -16,19 +16,19 @@ export function Arguments({ data }: ArgumentsProps) {
   return (
     <Card padding="lg">
       <SectionHeader icon={MessageSquare} title="Arguments" />
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
         {data.petitioner && data.petitioner.length > 0 && (
           <div>
-            <h4 className="text-sm font-semibold text-petitioner uppercase tracking-wide mb-4">
+            <h4 className="text-xs sm:text-sm font-semibold text-petitioner uppercase tracking-wide mb-3 sm:mb-4">
               Petitioner
             </h4>
             <ul className="space-y-3">
               {data.petitioner.map((arg, index) => (
-              <li key={index} className="flex items-start gap-3 text-secondary leading-relaxed">
+              <li key={index} className="flex items-start gap-2 sm:gap-3 text-secondary leading-relaxed text-sm">
                 <span className="flex-shrink-0 w-5 h-5 rounded-full bg-petitioner/10 text-petitioner text-xs font-medium flex items-center justify-center mt-0.5">
                   {index + 1}
                 </span>
-                <span>{arg}</span>
+                <span className="break-words">{arg}</span>
               </li>
             ))}
           </ul>
@@ -36,16 +36,16 @@ export function Arguments({ data }: ArgumentsProps) {
         )}
         {data.respondent && data.respondent.length > 0 && (
           <div>
-            <h4 className="text-sm font-semibold text-respondent uppercase tracking-wide mb-4">
+            <h4 className="text-xs sm:text-sm font-semibold text-respondent uppercase tracking-wide mb-3 sm:mb-4">
               Respondent
             </h4>
             <ul className="space-y-3">
               {data.respondent.map((arg, index) => (
-              <li key={index} className="flex items-start gap-3 text-secondary leading-relaxed">
+              <li key={index} className="flex items-start gap-2 sm:gap-3 text-secondary leading-relaxed text-sm">
                 <span className="flex-shrink-0 w-5 h-5 rounded-full bg-respondent/10 text-respondent text-xs font-medium flex items-center justify-center mt-0.5">
                   {index + 1}
                 </span>
-                <span>{arg}</span>
+                <span className="break-words">{arg}</span>
               </li>
             ))}
           </ul>

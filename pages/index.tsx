@@ -19,11 +19,11 @@ export default function Home() {
           </div>
         </div>
         
-        <h1 className="text-5xl font-serif font-bold text-primary mb-4">
+        <h1 className="text-4xl sm:text-5xl font-serif font-bold text-primary mb-4">
           Legal Intelligence Assistant
         </h1>
         
-        <p className="text-lg text-secondary mb-8 max-w-md mx-auto leading-relaxed">
+        <p className="text-base sm:text-lg text-secondary mb-8 max-w-md mx-auto leading-relaxed">
           Upload court judgment PDFs and extract structured legal intelligence in seconds.
         </p>
         
@@ -34,18 +34,18 @@ export default function Home() {
           </Button>
         </div>
         
-        <div className="mt-16 grid grid-cols-1 sm:grid-cols-3 gap-8 text-left">
-          <div className="p-6 bg-card rounded-card shadow-card">
-            <div className="text-accent font-semibold mb-2">Extract</div>
-            <p className="text-sm text-secondary">Automatically extract case facts, issues, and arguments</p>
+        <div className="mt-12 sm:mt-16 grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8 text-left">
+          <div className="p-4 sm:p-6 bg-card rounded-card shadow-card">
+            <div className="text-accent font-semibold mb-2 text-sm sm:text-base">Extract</div>
+            <p className="text-xs sm:text-sm text-secondary">Automatically extract case facts, issues, and arguments</p>
           </div>
-          <div className="p-6 bg-card rounded-card shadow-card">
-            <div className="text-accent font-semibold mb-2">Analyze</div>
-            <p className="text-sm text-secondary">AI-powered analysis of court reasoning and outcomes</p>
+          <div className="p-4 sm:p-6 bg-card rounded-card shadow-card">
+            <div className="text-accent font-semibold mb-2 text-sm sm:text-base">Analyze</div>
+            <p className="text-xs sm:text-sm text-secondary">AI-powered analysis of court reasoning and outcomes</p>
           </div>
-          <div className="p-6 bg-card rounded-card shadow-card">
-            <div className="text-accent font-semibold mb-2">Reuse</div>
-            <p className="text-sm text-secondary">Build reusable arguments from precedents</p>
+          <div className="p-4 sm:p-6 bg-card rounded-card shadow-card">
+            <div className="text-accent font-semibold mb-2 text-sm sm:text-base">Reuse</div>
+            <p className="text-xs sm:text-sm text-secondary">Build reusable arguments from precedents</p>
           </div>
         </div>
       </div>

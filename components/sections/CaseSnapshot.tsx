@@ -25,7 +25,7 @@ export function CaseSnapshot({ data }: CaseSnapshotProps) {
   return (
     <Card variant="highlight" padding="lg">
       <SectionHeader icon={Scale} title="Case Snapshot" />
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
         {items.map((item, index) => {
           const Icon = item.icon;
           return (
@@ -33,9 +33,9 @@ export function CaseSnapshot({ data }: CaseSnapshotProps) {
               <div className="p-2 bg-accent/10 rounded-lg">
                 <Icon size={18} className="text-accent" />
               </div>
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <div className="text-xs text-muted uppercase tracking-wide mb-1">{item.label}</div>
-                <div className="text-sm text-primary font-medium">{item.value}</div>
+                <div className="text-sm text-primary font-medium break-words">{item.value}</div>
               </div>
             </div>
           );

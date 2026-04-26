@@ -13,13 +13,13 @@ export function LegalIssues({ data }: LegalIssuesProps) {
   return (
     <Card padding="lg">
       <SectionHeader icon={HelpCircle} title="Legal Issues" />
-      <div className="space-y-4">
+      <div className="space-y-3 sm:space-y-4">
         {data.map((issue, index) => (
           <div
             key={index}
-            className="p-4 bg-primary/5 border-l-4 border-accent rounded-r-lg"
+            className="p-3 sm:p-4 bg-primary/5 border-l-4 border-accent rounded-r-lg"
           >
-            <p className="text-secondary leading-relaxed">{issue}</p>
+            <p className="text-secondary leading-relaxed text-sm">{issue}</p>
           </div>
         ))}
       </div>

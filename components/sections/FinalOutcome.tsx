@@ -13,8 +13,8 @@ export function FinalOutcome({ data }: FinalOutcomeProps) {
   return (
     <Card variant="highlight" padding="lg">
       <SectionHeader icon={Gavel} title="Final Outcome" />
-      <div className="p-6 bg-primary/5 border border-border rounded-lg">
-        <p className="text-secondary leading-relaxed">{data}</p>
+      <div className="p-4 sm:p-6 bg-primary/5 border border-border rounded-lg">
+        <p className="text-secondary leading-relaxed text-sm">{data}</p>
       </div>
     </Card>
   );

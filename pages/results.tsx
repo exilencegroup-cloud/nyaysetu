@@ -55,16 +55,16 @@ export default function Results() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card">
-        <div className="max-w-container mx-auto px-6 py-4 flex items-center justify-between">
-          <h1 className="text-xl font-serif font-semibold text-primary">Analysis Results</h1>
-          <Button onClick={handleNewUpload} variant="secondary" size="sm">
+        <div className="max-w-container mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between">
+          <h1 className="text-lg sm:text-xl font-serif font-semibold text-primary">Analysis Results</h1>
+          <Button onClick={handleNewUpload} variant="secondary" size="sm" className="text-xs sm:text-sm">
             Upload New
           </Button>
         </div>
       </header>
 
-      <main className="max-w-container mx-auto px-6 py-12">
-        <div className="space-y-12">
+      <main className="max-w-container mx-auto px-4 sm:px-6 py-8 sm:py-12">
+        <div className="space-y-8 sm:space-y-12">
           <CaseSnapshot data={analysis.snapshot} />
           <Facts data={analysis.facts} />
           <LegalIssues data={analysis.legal_issues} />

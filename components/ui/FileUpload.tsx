@@ -68,7 +68,7 @@ export function FileUpload({
     <div className={cn('w-full', className)}>
       <div
         className={cn(
-          'border-2 border-dashed rounded-card p-12 bg-background transition-all duration-200',
+          'border-2 border-dashed rounded-card p-8 sm:p-12 bg-background transition-all duration-200',
           isDragging ? 'border-primary bg-card' : 'border-border hover:border-accent hover:bg-card/50',
           error && 'border-red-500',
           selectedFile && 'border-accent bg-card'
@@ -88,25 +88,25 @@ export function FileUpload({
         />
         
         {!selectedFile ? (
-          <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center gap-4">
-            <UploadCloud size={48} className="text-muted" />
-            <p className="text-secondary">Drag & drop or click to upload</p>
-            <p className="text-muted text-sm">PDF only, max 10MB</p>
+          <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center gap-3 sm:gap-4">
+            <UploadCloud size={44} className="text-muted" />
+            <p className="text-secondary text-sm sm:text-base">Drag & drop or click to upload</p>
+            <p className="text-muted text-xs sm:text-sm">PDF only, max 10MB</p>
           </label>
         ) : (
-          <div className="flex items-center justify-between p-4 bg-background rounded-lg">
-            <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between p-3 sm:p-4 bg-background rounded-lg">
+            <div className="flex items-center gap-2 sm:gap-3">
               <div className="p-2 bg-accent/10 rounded-lg">
-                <UploadCloud size={24} className="text-accent" />
+                <UploadCloud size={22} className="text-accent" />
               </div>
-              <div>
-                <p className="text-primary font-medium">{selectedFile.name}</p>
-                <p className="text-muted text-sm">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
+              <div className="min-w-0">
+                <p className="text-primary font-medium text-sm truncate">{selectedFile.name}</p>
+                <p className="text-muted text-xs sm:text-sm">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
               </div>
             </div>
             <button
               onClick={handleRemove}
-              className="p-2 hover:bg-primary/5 rounded-lg transition-colors"
+              className="p-2 hover:bg-primary/5 rounded-lg transition-colors flex-shrink-0"
             >
               <X size={20} className="text-muted" />
             </button>
@@ -115,7 +115,7 @@ export function FileUpload({
       </div>
       
       {error && !selectedFile && (
-        <p className="text-red-500 text-sm mt-4 text-center">{error}</p>
+        <p className="text-red-500 text-xs sm:text-sm mt-4 text-center">{error}</p>
       )}
     </div>
   );
