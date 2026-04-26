@@ -4,10 +4,12 @@ import { SectionHeader } from '@/components/ui/SectionHeader';
 import { Copy, Check } from 'lucide-react';
 
 interface ReusableArgumentsProps {
-  data: string[];
+  data?: string[];
 }
 
 export function ReusableArguments({ data }: ReusableArgumentsProps) {
+  if (!data || data.length === 0) return null;
+  
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   const handleCopy = (text: string, index: number) => {

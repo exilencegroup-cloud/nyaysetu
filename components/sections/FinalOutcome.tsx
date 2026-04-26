@@ -4,10 +4,12 @@ import { SectionHeader } from '@/components/ui/SectionHeader';
 import { Gavel } from 'lucide-react';
 
 interface FinalOutcomeProps {
-  data: string;
+  data?: string;
 }
 
 export function FinalOutcome({ data }: FinalOutcomeProps) {
+  if (!data) return null;
+  
   return (
     <Card variant="highlight" padding="lg">
       <SectionHeader icon={Gavel} title="Final Outcome" />

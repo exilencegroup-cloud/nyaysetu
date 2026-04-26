@@ -4,10 +4,12 @@ import { SectionHeader } from '@/components/ui/SectionHeader';
 import { HelpCircle } from 'lucide-react';
 
 interface LegalIssuesProps {
-  data: string[];
+  data?: string[];
 }
 
 export function LegalIssues({ data }: LegalIssuesProps) {
+  if (!data || data.length === 0) return null;
+  
   return (
     <Card padding="lg">
       <SectionHeader icon={HelpCircle} title="Legal Issues" />

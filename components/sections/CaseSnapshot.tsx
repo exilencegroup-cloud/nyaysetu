@@ -4,23 +4,23 @@ import { SectionHeader } from '@/components/ui/SectionHeader';
 import { Scale, Calendar, MapPin, Users, FileText } from 'lucide-react';
 
 interface CaseSnapshotProps {
-  data: {
-    case_name: string;
-    court: string;
-    date: string;
-    judges: string;
-    case_type: string;
+  data?: {
+    case_name?: string;
+    court?: string;
+    date?: string;
+    judges?: string;
+    case_type?: string;
   };
 }
 
 export function CaseSnapshot({ data }: CaseSnapshotProps) {
   const items = [
-    { icon: FileText, label: 'Case Name', value: data.case_name },
-    { icon: Scale, label: 'Court', value: data.court },
-    { icon: Calendar, label: 'Date', value: data.date },
-    { icon: Users, label: 'Judges', value: data.judges },
-    { icon: FileText, label: 'Case Type', value: data.case_type },
-  ];
+    { icon: FileText, label: 'Case Name', value: data?.case_name },
+    { icon: Scale, label: 'Court', value: data?.court },
+    { icon: Calendar, label: 'Date', value: data?.date },
+    { icon: Users, label: 'Judges', value: data?.judges },
+    { icon: FileText, label: 'Case Type', value: data?.case_type },
+  ].filter(item => item.value);
 
   return (
     <Card variant="highlight" padding="lg">

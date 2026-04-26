@@ -4,10 +4,12 @@ import { SectionHeader } from '@/components/ui/SectionHeader';
 import { Lightbulb } from 'lucide-react';
 
 interface KeyTakeawaysProps {
-  data: string[];
+  data?: string[];
 }
 
 export function KeyTakeaways({ data }: KeyTakeawaysProps) {
+  if (!data || data.length === 0) return null;
+  
   return (
     <Card padding="lg">
       <SectionHeader icon={Lightbulb} title="Key Takeaways" />

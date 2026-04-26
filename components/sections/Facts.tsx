@@ -4,10 +4,12 @@ import { SectionHeader } from '@/components/ui/SectionHeader';
 import { List } from 'lucide-react';
 
 interface FactsProps {
-  data: string[];
+  data?: string[];
 }
 
 export function Facts({ data }: FactsProps) {
+  if (!data || data.length === 0) return null;
+  
   return (
     <Card padding="lg">
       <SectionHeader icon={List} title="Facts" />

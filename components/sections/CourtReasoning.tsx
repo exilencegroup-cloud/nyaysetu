@@ -4,10 +4,12 @@ import { SectionHeader } from '@/components/ui/SectionHeader';
 import { BrainCircuit } from 'lucide-react';
 
 interface CourtReasoningProps {
-  data: string[];
+  data?: string[];
 }
 
 export function CourtReasoning({ data }: CourtReasoningProps) {
+  if (!data || data.length === 0) return null;
+  
   return (
     <Card padding="lg">
       <SectionHeader icon={BrainCircuit} title="Court Reasoning" />
