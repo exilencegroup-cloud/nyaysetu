@@ -14,13 +14,19 @@ export interface ExtractionResult {
 export async function extractPdfText(buffer: Buffer): Promise<ExtractionResult> {
   try {
     const arrayBuffer = new Uint8Array(buffer);
+    console.log('Starting PDF extraction, buffer size:', arrayBuffer.length);
+    
     const loadingTask = pdfjsLib.getDocument({ 
       data: arrayBuffer,
       cMapUrl: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/cmaps/`,
       cMapPacked: true,
-      standardFontDataUrl: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/standard_fonts/`
+      standardFontDataUrl: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/standard_fonts/`,
+      disableAutoFetch: true,
+      disableStream: true
     });
+    
     const pdfDocument = await loadingTask.promise;
+    console.log('PDF loaded, numPages:', pdfDocument.numPages);
     
     let fullText = '';
     const numPages = pdfDocument.numPages;
@@ -31,6 +37,8 @@ export async function extractPdfText(buffer: Buffer): Promise<ExtractionResult> 
       const pageText = textContent.items.map((item: any) => item.str).join(' ');
       fullText += pageText + '\n';
     }
+    
+    console.log('Text extracted, length:', fullText.length);
     
     if (!fullText || fullText.trim().length === 0) {
       return {
@@ -44,8 +52,8 @@ export async function extractPdfText(buffer: Buffer): Promise<ExtractionResult> 
       text: fullText,
       pages: numPages,
     };
-  } catch (error) {
-    console.error('PDF extraction error:', error);
+  } catch (error: any) {
+    console.error('PDF extraction error:', error.message, error.stack);
     return {
       success: false,
       error: 'EXTRACTION_FAILED',
