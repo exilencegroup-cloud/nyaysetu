@@ -1,3 +1,4 @@
+// @ts-ignore
 import pdf from 'pdf-parse';
 import { PdfError } from '../types';
 
