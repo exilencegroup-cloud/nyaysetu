@@ -1,8 +1,8 @@
 import { PdfError } from '../types';
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Set up worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// Set up worker for server-side
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 export interface ExtractionResult {
   success: boolean;
@@ -14,7 +14,12 @@ export interface ExtractionResult {
 export async function extractPdfText(buffer: Buffer): Promise<ExtractionResult> {
   try {
     const arrayBuffer = new Uint8Array(buffer);
-    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const loadingTask = pdfjsLib.getDocument({ 
+      data: arrayBuffer,
+      cMapUrl: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/cmaps/`,
+      cMapPacked: true,
+      standardFontDataUrl: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/standard_fonts/`
+    });
     const pdfDocument = await loadingTask.promise;
     
     let fullText = '';
@@ -40,6 +45,7 @@ export async function extractPdfText(buffer: Buffer): Promise<ExtractionResult> 
       pages: numPages,
     };
   } catch (error) {
+    console.error('PDF extraction error:', error);
     return {
       success: false,
       error: 'EXTRACTION_FAILED',
