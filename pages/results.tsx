@@ -13,11 +13,18 @@ import { KeyTakeaways } from '@/components/sections/KeyTakeaways';
 import { ReusableArguments } from '@/components/sections/ReusableArguments';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Loader } from '@/components/ui/Loader';
+import { SourcePanel } from '@/components/ui/SourcePanel';
 
 export default function Results() {
   const router = useRouter();
   const [analysis, setAnalysis] = useState<LegalAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sourcePanelOpen, setSourcePanelOpen] = useState(false);
+  const [sourceData, setSourceData] = useState({
+    snippet: '',
+    highlightText: '',
+    hint: '',
+  });
 
   useEffect(() => {
     const stored = localStorage.getItem('nyaysetu_analysis');
@@ -34,6 +41,19 @@ export default function Results() {
   const handleNewUpload = () => {
     localStorage.removeItem('nyaysetu_analysis');
     router.push('/upload');
+  };
+
+  const handleViewSource = (snippet: string, highlightText: string, hint?: string) => {
+    setSourceData({
+      snippet,
+      highlightText,
+      hint: hint || '',
+    });
+    setSourcePanelOpen(true);
+  };
+
+  const handleCloseSource = () => {
+    setSourcePanelOpen(false);
   };
 
   if (loading) {
@@ -66,15 +86,23 @@ export default function Results() {
       <main className="max-w-container mx-auto px-4 sm:px-6 py-8 sm:py-12">
         <div className="space-y-8 sm:space-y-12">
           <CaseSnapshot data={analysis.snapshot} />
-          <Facts data={analysis.facts} />
-          <LegalIssues data={analysis.legal_issues} />
-          <Arguments data={analysis.arguments} />
-          <CourtReasoning data={analysis.court_reasoning} />
+          <Facts data={analysis.facts} onViewSource={handleViewSource} />
+          <LegalIssues data={analysis.legal_issues} onViewSource={handleViewSource} />
+          <Arguments data={analysis.arguments} onViewSource={handleViewSource} />
+          <CourtReasoning data={analysis.court_reasoning} onViewSource={handleViewSource} />
           <FinalOutcome data={analysis.outcome} />
-          <KeyTakeaways data={analysis.key_takeaways} />
-          <ReusableArguments data={analysis.reusable_arguments} />
+          <KeyTakeaways data={analysis.key_takeaways} onViewSource={handleViewSource} />
+          <ReusableArguments data={analysis.reusable_arguments} onViewSource={handleViewSource} />
         </div>
       </main>
+
+      <SourcePanel
+        isOpen={sourcePanelOpen}
+        onClose={handleCloseSource}
+        sourceSnippet={sourceData.snippet}
+        highlightText={sourceData.highlightText}
+        sourceHint={sourceData.hint || undefined}
+      />
     </div>
   );
 }

@@ -14,6 +14,11 @@ export default function Upload() {
   const handleFileSelect = (selectedFile: File) => {
     setFile(selectedFile);
     setError(null);
+    
+    // Warn if file is large (>8MB to leave room for analysis)
+    if (selectedFile.size > 8 * 1024 * 1024) {
+      setError('Note: Large file detected. Analysis may take longer.');
+    }
   };
 
   const handleAnalyze = async () => {

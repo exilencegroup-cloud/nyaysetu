@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { SectionHeader } from '@/components/ui/SectionHeader';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, ExternalLink } from 'lucide-react';
+import { SourcePoint } from '@/lib/types';
 
 interface ReusableArgumentsProps {
-  data?: string[];
+  data?: SourcePoint[];
+  onViewSource?: (snippet: string, highlightText: string, hint?: string) => void;
 }
 
-export function ReusableArguments({ data }: ReusableArgumentsProps) {
+export function ReusableArguments({ data, onViewSource }: ReusableArgumentsProps) {
   if (!data || data.length === 0) return null;
   
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
@@ -27,9 +29,20 @@ export function ReusableArguments({ data }: ReusableArgumentsProps) {
             key={index}
             className="p-3 sm:p-4 bg-card border border-border rounded-lg shadow-sm relative group"
           >
-            <p className="text-secondary leading-relaxed pr-10 sm:pr-12 text-sm break-words">{argument}</p>
+            <p className="text-secondary leading-relaxed pr-10 sm:pr-12 text-sm break-words mb-2">{argument.text}</p>
+            <div className="flex items-center gap-2">
+              {onViewSource && argument.source_snippet && (
+                <button
+                  onClick={() => onViewSource(argument.source_snippet, argument.text, argument.source_hint)}
+                  className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
+                >
+                  <ExternalLink size={12} />
+                  View Source
+                </button>
+              )}
+            </div>
             <button
-              onClick={() => handleCopy(argument, index)}
+              onClick={() => handleCopy(argument.text, index)}
               className="absolute top-3 sm:top-4 right-3 sm:right-4 p-2 text-muted hover:text-accent transition-colors"
               title="Copy to clipboard"
             >

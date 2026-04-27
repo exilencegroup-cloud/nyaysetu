@@ -1,13 +1,15 @@
 import React from 'react';
 import { Card } from '@/components/ui/Card';
 import { SectionHeader } from '@/components/ui/SectionHeader';
-import { HelpCircle } from 'lucide-react';
+import { HelpCircle, ExternalLink } from 'lucide-react';
+import { SourcePoint } from '@/lib/types';
 
 interface LegalIssuesProps {
-  data?: string[];
+  data?: SourcePoint[];
+  onViewSource?: (snippet: string, highlightText: string, hint?: string) => void;
 }
 
-export function LegalIssues({ data }: LegalIssuesProps) {
+export function LegalIssues({ data, onViewSource }: LegalIssuesProps) {
   if (!data || data.length === 0) return null;
   
   return (
@@ -19,7 +21,16 @@ export function LegalIssues({ data }: LegalIssuesProps) {
             key={index}
             className="p-3 sm:p-4 bg-primary/5 border-l-4 border-accent rounded-r-lg"
           >
-            <p className="text-secondary leading-relaxed text-sm">{issue}</p>
+            <p className="text-secondary leading-relaxed text-sm mb-2">{issue.text}</p>
+            {onViewSource && issue.source_snippet && (
+              <button
+                onClick={() => onViewSource(issue.source_snippet, issue.text, issue.source_hint)}
+                className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
+              >
+                <ExternalLink size={12} />
+                View Source
+              </button>
+            )}
           </div>
         ))}
       </div>

@@ -1,13 +1,15 @@
 import React from 'react';
 import { Card } from '@/components/ui/Card';
 import { SectionHeader } from '@/components/ui/SectionHeader';
-import { Lightbulb } from 'lucide-react';
+import { Lightbulb, ExternalLink } from 'lucide-react';
+import { SourcePoint } from '@/lib/types';
 
 interface KeyTakeawaysProps {
-  data?: string[];
+  data?: SourcePoint[];
+  onViewSource?: (snippet: string, highlightText: string, hint?: string) => void;
 }
 
-export function KeyTakeaways({ data }: KeyTakeawaysProps) {
+export function KeyTakeaways({ data, onViewSource }: KeyTakeawaysProps) {
   if (!data || data.length === 0) return null;
   
   return (
@@ -19,7 +21,16 @@ export function KeyTakeaways({ data }: KeyTakeawaysProps) {
             key={index}
             className="p-3 sm:p-4 bg-accent/5 border border-accent/20 rounded-lg"
           >
-            <p className="text-secondary leading-relaxed text-sm">{takeaway}</p>
+            <p className="text-secondary leading-relaxed text-sm mb-2">{takeaway.text}</p>
+            {onViewSource && takeaway.source_snippet && (
+              <button
+                onClick={() => onViewSource(takeaway.source_snippet, takeaway.text, takeaway.source_hint)}
+                className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
+              >
+                <ExternalLink size={12} />
+                View Source
+              </button>
+            )}
           </div>
         ))}
       </div>

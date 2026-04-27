@@ -1,16 +1,18 @@
 import React from 'react';
 import { Card } from '@/components/ui/Card';
 import { SectionHeader } from '@/components/ui/SectionHeader';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, ExternalLink } from 'lucide-react';
+import { SourcePoint } from '@/lib/types';
 
 interface ArgumentsProps {
   data?: {
-    petitioner?: string[];
-    respondent?: string[];
+    petitioner?: SourcePoint[];
+    respondent?: SourcePoint[];
   };
+  onViewSource?: (snippet: string, highlightText: string, hint?: string) => void;
 }
 
-export function Arguments({ data }: ArgumentsProps) {
+export function Arguments({ data, onViewSource }: ArgumentsProps) {
   if (!data) return null;
   
   return (
@@ -28,7 +30,18 @@ export function Arguments({ data }: ArgumentsProps) {
                 <span className="flex-shrink-0 w-5 h-5 rounded-full bg-petitioner/10 text-petitioner text-xs font-medium flex items-center justify-center mt-0.5">
                   {index + 1}
                 </span>
-                <span className="break-words">{arg}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="break-words mb-1">{arg.text}</p>
+                  {onViewSource && arg.source_snippet && (
+                    <button
+                      onClick={() => onViewSource(arg.source_snippet, arg.text, arg.source_hint)}
+                      className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
+                    >
+                      <ExternalLink size={12} />
+                      View Source
+                    </button>
+                  )}
+                </div>
               </li>
             ))}
           </ul>
@@ -45,7 +58,18 @@ export function Arguments({ data }: ArgumentsProps) {
                 <span className="flex-shrink-0 w-5 h-5 rounded-full bg-respondent/10 text-respondent text-xs font-medium flex items-center justify-center mt-0.5">
                   {index + 1}
                 </span>
-                <span className="break-words">{arg}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="break-words mb-1">{arg.text}</p>
+                  {onViewSource && arg.source_snippet && (
+                    <button
+                      onClick={() => onViewSource(arg.source_snippet, arg.text, arg.source_hint)}
+                      className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
+                    >
+                      <ExternalLink size={12} />
+                      View Source
+                    </button>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

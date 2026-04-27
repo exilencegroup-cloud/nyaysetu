@@ -1,13 +1,15 @@
 import React from 'react';
 import { Card } from '@/components/ui/Card';
 import { SectionHeader } from '@/components/ui/SectionHeader';
-import { List } from 'lucide-react';
+import { List, ExternalLink } from 'lucide-react';
+import { SourcePoint } from '@/lib/types';
 
 interface FactsProps {
-  data?: string[];
+  data?: SourcePoint[];
+  onViewSource?: (snippet: string, highlightText: string, hint?: string) => void;
 }
 
-export function Facts({ data }: FactsProps) {
+export function Facts({ data, onViewSource }: FactsProps) {
   if (!data || data.length === 0) return null;
   
   return (
@@ -19,7 +21,18 @@ export function Facts({ data }: FactsProps) {
             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-accent/10 text-accent text-sm font-medium flex items-center justify-center mt-0.5">
               {index + 1}
             </span>
-            <span className="break-words">{fact}</span>
+            <div className="flex-1 min-w-0">
+              <p className="break-words mb-1">{fact.text}</p>
+              {onViewSource && fact.source_snippet && (
+                <button
+                  onClick={() => onViewSource(fact.source_snippet, fact.text, fact.source_hint)}
+                  className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
+                >
+                  <ExternalLink size={12} />
+                  View Source
+                </button>
+              )}
+            </div>
           </li>
         ))}
       </ul>
