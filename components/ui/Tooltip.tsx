@@ -15,6 +15,9 @@ export function Tooltip({ children, content, className }: TooltipProps) {
       className="relative inline-block"
       onMouseEnter={() => setIsVisible(true)}
       onMouseLeave={() => setIsVisible(false)}
+      onFocus={() => setIsVisible(true)}
+      onBlur={() => setIsVisible(false)}
+      tabIndex={0}
     >
       {children}
       {isVisible && (
@@ -22,7 +25,7 @@ export function Tooltip({ children, content, className }: TooltipProps) {
           className={cn(
             'absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2',
             'px-3 py-2 bg-primary text-white text-xs rounded-lg',
-            'whitespace-nowrap max-w-xs',
+            'whitespace-normal max-w-xs',
             'shadow-modal z-50',
             'animate-in fade-in slide-in-from-bottom-1 duration-200',
             className

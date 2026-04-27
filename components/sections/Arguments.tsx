@@ -14,7 +14,7 @@ interface ArgumentsProps {
   onViewSource?: (snippet: string, highlightText: string, hint?: string, pageNumber?: number, paragraphNumber?: number) => void;
 }
 
-const getStrengthBadge = (strength?: string) => {
+const getStrengthBadge = (strength?: 'strong' | 'moderate' | 'weak') => {
   switch (strength) {
     case 'strong':
       return {
