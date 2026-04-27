@@ -4,6 +4,8 @@ export const SourcePointSchema = z.object({
   text: z.string(),
   source_snippet: z.string(),
   source_hint: z.string().optional(),
+  page_number: z.number().optional(),
+  paragraph_number: z.number().optional(),
 });
 
 export const LegalAnalysisSchema = z.object({

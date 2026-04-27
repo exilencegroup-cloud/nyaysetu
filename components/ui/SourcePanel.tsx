@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { X, Copy } from 'lucide-react';
+import { X, Copy, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface SourcePanelProps {
@@ -8,9 +8,11 @@ interface SourcePanelProps {
   sourceSnippet: string;
   highlightText?: string;
   sourceHint?: string;
+  pageNumber?: number;
+  paragraphNumber?: number;
 }
 
-export function SourcePanel({ isOpen, onClose, sourceSnippet, highlightText, sourceHint }: SourcePanelProps) {
+export function SourcePanel({ isOpen, onClose, sourceSnippet, highlightText, sourceHint, pageNumber, paragraphNumber }: SourcePanelProps) {
   const handleCopy = () => {
     navigator.clipboard.writeText(sourceSnippet);
   };
@@ -66,7 +68,10 @@ export function SourcePanel({ isOpen, onClose, sourceSnippet, highlightText, sou
       )}>
         {/* Header */}
         <div className="flex items-center justify-between p-4 sm:p-6 border-b border-border bg-card">
-          <h3 className="text-lg sm:text-xl font-serif font-semibold text-primary">Source Evidence</h3>
+          <div className="flex items-center gap-2">
+            <FileText size={20} className="text-accent" />
+            <h3 className="text-lg sm:text-xl font-serif font-semibold text-primary">Source Evidence</h3>
+          </div>
           <button
             onClick={onClose}
             className="p-2 hover:bg-primary/5 rounded-button transition-colors duration-base"
@@ -76,12 +81,26 @@ export function SourcePanel({ isOpen, onClose, sourceSnippet, highlightText, sou
           </button>
         </div>
 
-        {/* Source Hint */}
-        {sourceHint && (
-          <div className="px-4 sm:px-6 py-2 bg-accent/5 border-b border-border">
-            <p className="text-xs sm:text-sm text-muted font-medium">{sourceHint}</p>
+        {/* Location Info */}
+        <div className="px-4 sm:px-6 py-3 bg-accent/5 border-b border-border">
+          <div className="flex items-center gap-4 text-xs sm:text-sm">
+            {pageNumber && (
+              <div className="flex items-center gap-1 text-muted">
+                <span className="font-medium">Page:</span>
+                <span className="text-primary font-semibold">{pageNumber}</span>
+              </div>
+            )}
+            {paragraphNumber && (
+              <div className="flex items-center gap-1 text-muted">
+                <span className="font-medium">Paragraph:</span>
+                <span className="text-primary font-semibold">{paragraphNumber}</span>
+              </div>
+            )}
           </div>
-        )}
+          {sourceHint && (
+            <p className="text-xs text-muted mt-1">{sourceHint}</p>
+          )}
+        </div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-background">

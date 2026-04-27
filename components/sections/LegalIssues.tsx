@@ -6,7 +6,7 @@ import { SourcePoint } from '@/lib/types';
 
 interface LegalIssuesProps {
   data?: SourcePoint[];
-  onViewSource?: (snippet: string, highlightText: string, hint?: string) => void;
+  onViewSource?: (snippet: string, highlightText: string, hint?: string, pageNumber?: number, paragraphNumber?: number) => void;
 }
 
 export function LegalIssues({ data, onViewSource }: LegalIssuesProps) {
@@ -24,7 +24,7 @@ export function LegalIssues({ data, onViewSource }: LegalIssuesProps) {
             <p className="text-secondary leading-relaxed text-sm mb-2">{issue.text}</p>
             {onViewSource && issue.source_snippet && (
               <button
-                onClick={() => onViewSource(issue.source_snippet, issue.text, issue.source_hint)}
+                onClick={() => onViewSource(issue.source_snippet, issue.text, issue.source_hint, issue.page_number, issue.paragraph_number)}
                 className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
               >
                 <ExternalLink size={12} />

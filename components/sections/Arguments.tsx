@@ -9,7 +9,7 @@ interface ArgumentsProps {
     petitioner?: SourcePoint[];
     respondent?: SourcePoint[];
   };
-  onViewSource?: (snippet: string, highlightText: string, hint?: string) => void;
+  onViewSource?: (snippet: string, highlightText: string, hint?: string, pageNumber?: number, paragraphNumber?: number) => void;
 }
 
 export function Arguments({ data, onViewSource }: ArgumentsProps) {
@@ -34,7 +34,7 @@ export function Arguments({ data, onViewSource }: ArgumentsProps) {
                   <p className="break-words mb-1">{arg.text}</p>
                   {onViewSource && arg.source_snippet && (
                     <button
-                      onClick={() => onViewSource(arg.source_snippet, arg.text, arg.source_hint)}
+                      onClick={() => onViewSource(arg.source_snippet, arg.text, arg.source_hint, arg.page_number, arg.paragraph_number)}
                       className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
                     >
                       <ExternalLink size={12} />
@@ -62,7 +62,7 @@ export function Arguments({ data, onViewSource }: ArgumentsProps) {
                   <p className="break-words mb-1">{arg.text}</p>
                   {onViewSource && arg.source_snippet && (
                     <button
-                      onClick={() => onViewSource(arg.source_snippet, arg.text, arg.source_hint)}
+                      onClick={() => onViewSource(arg.source_snippet, arg.text, arg.source_hint, arg.page_number, arg.paragraph_number)}
                       className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
                     >
                       <ExternalLink size={12} />

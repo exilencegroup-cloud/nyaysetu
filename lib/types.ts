@@ -2,6 +2,8 @@ export interface SourcePoint {
   text: string;
   source_snippet: string;
   source_hint?: string;
+  page_number?: number;
+  paragraph_number?: number;
 }
 
 export interface LegalAnalysis {

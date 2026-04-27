@@ -6,7 +6,7 @@ import { SourcePoint } from '@/lib/types';
 
 interface CourtReasoningProps {
   data?: SourcePoint[];
-  onViewSource?: (snippet: string, highlightText: string, hint?: string) => void;
+  onViewSource?: (snippet: string, highlightText: string, hint?: string, pageNumber?: number, paragraphNumber?: number) => void;
 }
 
 export function CourtReasoning({ data, onViewSource }: CourtReasoningProps) {
@@ -25,7 +25,7 @@ export function CourtReasoning({ data, onViewSource }: CourtReasoningProps) {
               <p className="break-words mb-1">{reasoning.text}</p>
               {onViewSource && reasoning.source_snippet && (
                 <button
-                  onClick={() => onViewSource(reasoning.source_snippet, reasoning.text, reasoning.source_hint)}
+                  onClick={() => onViewSource(reasoning.source_snippet, reasoning.text, reasoning.source_hint, reasoning.page_number, reasoning.paragraph_number)}
                   className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
                 >
                   <ExternalLink size={12} />

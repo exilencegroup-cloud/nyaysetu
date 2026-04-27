@@ -6,7 +6,7 @@ import { SourcePoint } from '@/lib/types';
 
 interface ReusableArgumentsProps {
   data?: SourcePoint[];
-  onViewSource?: (snippet: string, highlightText: string, hint?: string) => void;
+  onViewSource?: (snippet: string, highlightText: string, hint?: string, pageNumber?: number, paragraphNumber?: number) => void;
 }
 
 export function ReusableArguments({ data, onViewSource }: ReusableArgumentsProps) {
@@ -33,7 +33,7 @@ export function ReusableArguments({ data, onViewSource }: ReusableArgumentsProps
             <div className="flex items-center gap-2">
               {onViewSource && argument.source_snippet && (
                 <button
-                  onClick={() => onViewSource(argument.source_snippet, argument.text, argument.source_hint)}
+                  onClick={() => onViewSource(argument.source_snippet, argument.text, argument.source_hint, argument.page_number, argument.paragraph_number)}
                   className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
                 >
                   <ExternalLink size={12} />

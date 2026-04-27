@@ -24,6 +24,8 @@ export default function Results() {
     snippet: '',
     highlightText: '',
     hint: '',
+    pageNumber: undefined as number | undefined,
+    paragraphNumber: undefined as number | undefined,
   });
 
   useEffect(() => {
@@ -43,11 +45,13 @@ export default function Results() {
     router.push('/upload');
   };
 
-  const handleViewSource = (snippet: string, highlightText: string, hint?: string) => {
+  const handleViewSource = (snippet: string, highlightText: string, hint?: string, pageNumber?: number, paragraphNumber?: number) => {
     setSourceData({
       snippet,
       highlightText,
       hint: hint || '',
+      pageNumber,
+      paragraphNumber,
     });
     setSourcePanelOpen(true);
   };
@@ -102,6 +106,8 @@ export default function Results() {
         sourceSnippet={sourceData.snippet}
         highlightText={sourceData.highlightText}
         sourceHint={sourceData.hint || undefined}
+        pageNumber={sourceData.pageNumber}
+        paragraphNumber={sourceData.paragraphNumber}
       />
     </div>
   );

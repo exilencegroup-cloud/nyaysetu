@@ -6,7 +6,7 @@ import { SourcePoint } from '@/lib/types';
 
 interface KeyTakeawaysProps {
   data?: SourcePoint[];
-  onViewSource?: (snippet: string, highlightText: string, hint?: string) => void;
+  onViewSource?: (snippet: string, highlightText: string, hint?: string, pageNumber?: number, paragraphNumber?: number) => void;
 }
 
 export function KeyTakeaways({ data, onViewSource }: KeyTakeawaysProps) {
@@ -24,7 +24,7 @@ export function KeyTakeaways({ data, onViewSource }: KeyTakeawaysProps) {
             <p className="text-secondary leading-relaxed text-sm mb-2">{takeaway.text}</p>
             {onViewSource && takeaway.source_snippet && (
               <button
-                onClick={() => onViewSource(takeaway.source_snippet, takeaway.text, takeaway.source_hint)}
+                onClick={() => onViewSource(takeaway.source_snippet, takeaway.text, takeaway.source_hint, takeaway.page_number, takeaway.paragraph_number)}
                 className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
               >
                 <ExternalLink size={12} />
