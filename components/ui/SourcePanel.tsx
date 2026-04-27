@@ -27,7 +27,7 @@ export function SourcePanel({ isOpen, onClose, sourceSnippet, highlightText, sou
     return parts.map((part, index) => {
       if (part.toLowerCase() === highlightText.toLowerCase()) {
         return (
-          <mark key={index} className="bg-yellow-200/80 px-1 rounded">
+          <mark key={index} className="bg-accent/20 px-1 rounded border-b-2 border-accent">
             {part}
           </mark>
         );
@@ -54,49 +54,49 @@ export function SourcePanel({ isOpen, onClose, sourceSnippet, highlightText, sou
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/50 z-40 transition-opacity duration-200"
+        className="fixed inset-0 bg-primary/20 backdrop-blur-sm z-40 transition-opacity duration-200"
         onClick={onClose}
       />
       
       {/* Panel */}
       <div className={cn(
-        'fixed right-0 top-0 h-full w-full sm:w-[35%] md:w-[40%] bg-white shadow-2xl z-50',
+        'fixed right-0 top-0 h-full w-full sm:w-[35%] md:w-[40%] bg-card shadow-modal z-50',
         'transform transition-transform duration-300 ease-in-out',
         'flex flex-col'
       )}>
         {/* Header */}
-        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-border">
+        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-border bg-card">
           <h3 className="text-lg sm:text-xl font-serif font-semibold text-primary">Source Evidence</h3>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-primary/5 rounded-lg transition-colors"
+            className="p-2 hover:bg-primary/5 rounded-button transition-colors duration-base"
             aria-label="Close"
           >
-            <X size={20} className="text-muted" />
+            <X size={20} className="text-muted hover:text-primary transition-colors" />
           </button>
         </div>
 
         {/* Source Hint */}
         {sourceHint && (
-          <div className="px-4 sm:px-6 py-2 bg-primary/5 border-b border-border">
-            <p className="text-xs sm:text-sm text-muted">{sourceHint}</p>
+          <div className="px-4 sm:px-6 py-2 bg-accent/5 border-b border-border">
+            <p className="text-xs sm:text-sm text-muted font-medium">{sourceHint}</p>
           </div>
         )}
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-background">
           <div className="prose prose-sm sm:prose-base max-w-none">
-            <p className="text-secondary leading-relaxed whitespace-pre-wrap">
+            <p className="text-secondary leading-relaxed whitespace-pre-wrap font-sans">
               {getHighlightedContent()}
             </p>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="p-4 sm:p-6 border-t border-border">
+        <div className="p-4 sm:p-6 border-t border-border bg-card">
           <button
             onClick={handleCopy}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 sm:py-3 bg-card border border-border rounded-button text-primary hover:bg-primary/5 transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 sm:py-3 bg-primary text-white rounded-button font-medium hover:bg-primary-hover transition-colors duration-base shadow-card"
           >
             <Copy size={18} />
             <span className="text-sm sm:text-base">Copy Source</span>
