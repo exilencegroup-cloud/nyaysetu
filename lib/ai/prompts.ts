@@ -44,7 +44,9 @@ REQUIRED OUTPUT FORMAT:
         "source_snippet": "Full paragraph from original text containing this argument",
         "source_hint": "Page X or Section Y (optional)",
         "page_number": 3,
-        "paragraph_number": 15
+        "paragraph_number": 15,
+        "strength": "strong | moderate | weak",
+        "strength_reason": "Brief explanation (1 line)"
       }
     ],
     "respondent": [
@@ -53,7 +55,9 @@ REQUIRED OUTPUT FORMAT:
         "source_snippet": "Full paragraph from original text containing this argument",
         "source_hint": "Page X or Section Y (optional)",
         "page_number": 4,
-        "paragraph_number": 20
+        "paragraph_number": 20,
+        "strength": "strong | moderate | weak",
+        "strength_reason": "Brief explanation (1 line)"
       }
     ]
   },
@@ -125,6 +129,15 @@ ARGUMENTS:
 - Respondent: 3-5 strongest counter-points
 - Capture legal basis cited
 - For each argument, provide the exact source paragraph with page/paragraph numbers
+
+ARGUMENT STRENGTH CLASSIFICATION:
+For each argument, classify its strength based on court reasoning:
+
+- Strong: Clearly accepted or supported by court reasoning
+- Moderate: Mentioned but not decisive in outcome
+- Weak: Rejected, contradicted, or not addressed by court
+
+Include a 1-line reason explaining the classification.
 
 COURT REASONING:
 - Paragraph-wise breakdown

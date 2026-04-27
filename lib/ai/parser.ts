@@ -6,6 +6,8 @@ export const SourcePointSchema = z.object({
   source_hint: z.string().optional(),
   page_number: z.number().optional(),
   paragraph_number: z.number().optional(),
+  strength: z.enum(['strong', 'moderate', 'weak']).optional(),
+  strength_reason: z.string().optional(),
 });
 
 export const LegalAnalysisSchema = z.object({

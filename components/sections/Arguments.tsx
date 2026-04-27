@@ -1,8 +1,10 @@
 import React from 'react';
 import { Card } from '@/components/ui/Card';
 import { SectionHeader } from '@/components/ui/SectionHeader';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { MessageSquare, ExternalLink } from 'lucide-react';
 import { SourcePoint } from '@/lib/types';
+import { cn } from '@/lib/utils';
 
 interface ArgumentsProps {
   data?: {
@@ -11,6 +13,28 @@ interface ArgumentsProps {
   };
   onViewSource?: (snippet: string, highlightText: string, hint?: string, pageNumber?: number, paragraphNumber?: number) => void;
 }
+
+const getStrengthBadge = (strength?: string) => {
+  switch (strength) {
+    case 'strong':
+      return {
+        label: 'Strong',
+        className: 'bg-green-100 text-green-800 border-green-200',
+      };
+    case 'moderate':
+      return {
+        label: 'Moderate',
+        className: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+      };
+    case 'weak':
+      return {
+        label: 'Weak',
+        className: 'bg-red-100 text-red-800 border-red-200',
+      };
+    default:
+      return null;
+  }
+};
 
 export function Arguments({ data, onViewSource }: ArgumentsProps) {
   if (!data) return null;
@@ -25,27 +49,42 @@ export function Arguments({ data, onViewSource }: ArgumentsProps) {
               Petitioner
             </h4>
             <ul className="space-y-3">
-              {data.petitioner.map((arg, index) => (
-              <li key={index} className="flex items-start gap-2 sm:gap-3 text-secondary leading-relaxed text-sm">
-                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-petitioner/10 text-petitioner text-xs font-medium flex items-center justify-center mt-0.5">
-                  {index + 1}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="break-words mb-1">{arg.text}</p>
-                  {onViewSource && arg.source_snippet && (
-                    <button
-                      onClick={() => onViewSource(arg.source_snippet, arg.text, arg.source_hint, arg.page_number, arg.paragraph_number)}
-                      className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
-                    >
-                      <ExternalLink size={12} />
-                      View Source
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
+              {data.petitioner.map((arg, index) => {
+                const strengthBadge = getStrengthBadge(arg.strength);
+                return (
+                  <li key={index} className="flex items-start gap-2 sm:gap-3 text-secondary leading-relaxed text-sm">
+                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-petitioner/10 text-petitioner text-xs font-medium flex items-center justify-center mt-0.5">
+                      {index + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="break-words mb-1">{arg.text}</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {strengthBadge && arg.strength_reason && (
+                          <Tooltip content={arg.strength_reason}>
+                            <span className={cn(
+                              'px-2 py-0.5 text-xs font-medium rounded-full border',
+                              strengthBadge.className
+                            )}>
+                              {strengthBadge.label}
+                            </span>
+                          </Tooltip>
+                        )}
+                        {onViewSource && arg.source_snippet && (
+                          <button
+                            onClick={() => onViewSource(arg.source_snippet, arg.text, arg.source_hint, arg.page_number, arg.paragraph_number)}
+                            className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
+                          >
+                            <ExternalLink size={12} />
+                            View Source
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         )}
         {data.respondent && data.respondent.length > 0 && (
           <div>
@@ -53,27 +92,42 @@ export function Arguments({ data, onViewSource }: ArgumentsProps) {
               Respondent
             </h4>
             <ul className="space-y-3">
-              {data.respondent.map((arg, index) => (
-              <li key={index} className="flex items-start gap-2 sm:gap-3 text-secondary leading-relaxed text-sm">
-                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-respondent/10 text-respondent text-xs font-medium flex items-center justify-center mt-0.5">
-                  {index + 1}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="break-words mb-1">{arg.text}</p>
-                  {onViewSource && arg.source_snippet && (
-                    <button
-                      onClick={() => onViewSource(arg.source_snippet, arg.text, arg.source_hint, arg.page_number, arg.paragraph_number)}
-                      className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
-                    >
-                      <ExternalLink size={12} />
-                      View Source
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
+              {data.respondent.map((arg, index) => {
+                const strengthBadge = getStrengthBadge(arg.strength);
+                return (
+                  <li key={index} className="flex items-start gap-2 sm:gap-3 text-secondary leading-relaxed text-sm">
+                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-respondent/10 text-respondent text-xs font-medium flex items-center justify-center mt-0.5">
+                      {index + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="break-words mb-1">{arg.text}</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {strengthBadge && arg.strength_reason && (
+                          <Tooltip content={arg.strength_reason}>
+                            <span className={cn(
+                              'px-2 py-0.5 text-xs font-medium rounded-full border',
+                              strengthBadge.className
+                            )}>
+                              {strengthBadge.label}
+                            </span>
+                          </Tooltip>
+                        )}
+                        {onViewSource && arg.source_snippet && (
+                          <button
+                            onClick={() => onViewSource(arg.source_snippet, arg.text, arg.source_hint, arg.page_number, arg.paragraph_number)}
+                            className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
+                          >
+                            <ExternalLink size={12} />
+                            View Source
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         )}
       </div>
     </Card>

@@ -4,6 +4,8 @@ export interface SourcePoint {
   source_hint?: string;
   page_number?: number;
   paragraph_number?: number;
+  strength?: 'strong' | 'moderate' | 'weak';
+  strength_reason?: string;
 }
 
 export interface LegalAnalysis {
