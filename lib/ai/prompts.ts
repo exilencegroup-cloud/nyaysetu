@@ -88,6 +88,14 @@ REQUIRED OUTPUT FORMAT:
       "page_number": 7,
       "paragraph_number": 35
     }
+  ],
+  "risks": [
+    {
+      "risk": "Weak evidence for claim X",
+      "type": "evidence | procedural | logical | documentation",
+      "severity": "high | medium | low",
+      "explanation": "Brief explanation of why this is a risk"
+    }
   ]
 }
 
@@ -161,6 +169,22 @@ REUSABLE ARGUMENTS:
 - Framed generally for future use
 - Include legal basis
 - For each template, provide the exact source paragraph with page/paragraph numbers
+
+RISK DETECTION:
+Identify potential risks or weaknesses in the case:
+
+Risk types:
+- evidence: Weak or missing evidence, lack of supporting documents
+- procedural: Procedural flaws, delay issues, jurisdictional problems
+- logical: Contradictions, logical inconsistencies in arguments
+- documentation: Missing or incomplete documentation
+
+Severity levels:
+- high: Critical issue that could significantly impact the case
+- medium: Notable issue that should be addressed
+- low: Minor concern or potential improvement
+
+For each risk, provide a clear explanation of why it's a risk.
 
 ANALYZE THIS JUDGMENT:
 `;

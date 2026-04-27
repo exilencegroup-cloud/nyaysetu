@@ -10,6 +10,13 @@ export const SourcePointSchema = z.object({
   strength_reason: z.string().optional(),
 });
 
+export const RiskFlagSchema = z.object({
+  risk: z.string(),
+  type: z.enum(['evidence', 'procedural', 'logical', 'documentation']),
+  severity: z.enum(['high', 'medium', 'low']),
+  explanation: z.string(),
+});
+
 export const LegalAnalysisSchema = z.object({
   snapshot: z.object({
     case_name: z.string(),
@@ -28,10 +35,12 @@ export const LegalAnalysisSchema = z.object({
   outcome: z.string().optional(),
   key_takeaways: z.array(SourcePointSchema).optional(),
   reusable_arguments: z.array(SourcePointSchema).optional(),
+  risks: z.array(RiskFlagSchema).optional(),
 });
 
 export type LegalAnalysis = z.infer<typeof LegalAnalysisSchema>;
 export type SourcePoint = z.infer<typeof SourcePointSchema>;
+export type RiskFlag = z.infer<typeof RiskFlagSchema>;
 
 export function validateAnalysis(data: unknown): LegalAnalysis {
   return LegalAnalysisSchema.parse(data);

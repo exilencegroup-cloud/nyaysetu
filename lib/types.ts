@@ -8,6 +8,13 @@ export interface SourcePoint {
   strength_reason?: string;
 }
 
+export interface RiskFlag {
+  risk: string;
+  type: 'evidence' | 'procedural' | 'logical' | 'documentation';
+  severity: 'high' | 'medium' | 'low';
+  explanation: string;
+}
+
 export interface LegalAnalysis {
   snapshot: {
     case_name: string;
@@ -26,6 +33,7 @@ export interface LegalAnalysis {
   outcome?: string;
   key_takeaways?: SourcePoint[];
   reusable_arguments?: SourcePoint[];
+  risks?: RiskFlag[];
 }
 
 export type AppState = 'idle' | 'uploading' | 'processing' | 'success' | 'error';
