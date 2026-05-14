@@ -38,4 +38,5 @@ next-env.d.ts
 
 # local Codex/Superpowers artifacts
 .superpowers/
+.worktrees/
 .codex-next-dev*.log
