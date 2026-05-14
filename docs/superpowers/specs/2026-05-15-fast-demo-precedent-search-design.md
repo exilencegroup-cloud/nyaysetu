@@ -10,7 +10,12 @@ This design is intentionally lean. It is not the full case-workspace product yet
 
 ## Approved Product Scope
 
-The MVP should support one impressive workflow:
+The app home screen should expose two clear paths:
+
+1. The existing judgment-analysis path, which keeps the current upload and structured legal intelligence flow.
+2. The new precedent-search demo path, which lets a lawyer upload case documents and find similar public cases.
+
+The new MVP path should support one impressive workflow:
 
 1. Upload one or more documents for a matter, such as a brief, petition, order, or judgment.
 2. Extract the legal issues, key facts, statutes or sections, procedural posture, relief sought, and important arguments.
@@ -37,6 +42,7 @@ The fast demo uses one visible workflow but keeps the internals modular.
 
 The frontend provides:
 
+- A home screen with two primary entry points: analyze a judgment, or find similar public precedents.
 - Multi-document upload.
 - Processing states for extraction, search, comparison, and result preparation.
 - A research dashboard with ranked matches on one side and selected-case explanations on the other.
