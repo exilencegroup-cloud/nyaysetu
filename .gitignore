@@ -35,3 +35,7 @@ next-env.d.ts
 
 .vercel
 .env*.local
+
+# local Codex/Superpowers artifacts
+.superpowers/
+.codex-next-dev*.log
