@@ -34,6 +34,7 @@ const maxSynchronousScannedPages = positiveNumber(process.env.TYPE_COPY_MAX_SYNC
 const maxSynchronousPdfPages = positiveNumber(process.env.TYPE_COPY_MAX_SYNC_PDF_PAGES, 120);
 const ocrRateLimitRetryAfterSeconds = positiveNumber(process.env.TYPE_COPY_OCR_RATE_LIMIT_RETRY_SECONDS, 25);
 const rateLimitedOcrChunkSize = positiveNumber(process.env.TYPE_COPY_RATE_LIMIT_OCR_CHUNK_PAGES, 3);
+const minimumMeaningfulOcrChars = 4;
 const textLayerSampleThreshold = 40;
 const allowedLayoutHtmlTags = new Set(['div', 'p', 'span', 'br', 'strong', 'em', 'u', 'pre', 'table', 'thead', 'tbody', 'tr', 'th', 'td']);
 const allowedLayoutStyleProps = new Set([
@@ -643,7 +644,7 @@ async function ocrPdfViaFileInput(pdfPath: string, fileName: string, pages: Type
         const layout = parsedPages.get(page.pageNumber);
         const text = normalizeExtractedText(layout?.text || '');
 
-        if (text && text !== '(Not Readable)') {
+        if (isUsableOcrText(text)) {
           page.text = text;
           page.layoutHtml = layout?.layoutHtml || textToLayoutHtml(text);
           page.status = 'ocr';
@@ -688,6 +689,9 @@ async function transcribePdfPageRange(fileId: string, fileName: string, pageNumb
       'Mark unreadable words as (Not Readable).',
       'If one table cell is unreadable, mark only that cell as (Not Readable).',
       'Represent stamps, seals, and signatures as short markers such as (Seal) or (Signature).',
+      'If you cannot confidently transcribe meaningful visible text for a page, set that page to (Not Readable) instead of guessing.',
+      'Do not return blank JSON, newline-only content, escape-sequence padding, or one-letter placeholders.',
+      'Use only meaningful line breaks; do not use repeated escaped newlines to imitate vertical spacing.',
     ].join(' '),
     input: [
       {
@@ -703,6 +707,7 @@ async function transcribePdfPageRange(fileId: string, fileName: string, pageNumb
               '{"pages":[{"pageNumber":1,"plainText":"...","layoutHtml":"..."}]}',
               'Return the requested pages in order.',
               'If a requested page has no readable text, set plainText to "(Not Readable)" and layoutHtml to "<p>(Not Readable)</p>".',
+              'Never fill plainText or layoutHtml with repeated \\n characters or placeholder letters.',
             ].join(' '),
           },
           {
@@ -718,7 +723,7 @@ async function transcribePdfPageRange(fileId: string, fileName: string, pageNumb
       format: {
         type: 'json_schema',
         name: 'type_copy_layout_pages',
-        strict: false,
+        strict: true,
         schema: typeCopyLayoutSchema(),
       },
     },
@@ -783,6 +788,9 @@ async function ocrImageBuffer(imageBuffer: Buffer, pageNumber: number, mimeType:
           'If one table cell is unreadable, mark only that cell as (Not Readable).',
           'Represent stamps, seals, and signatures as short markers such as (Seal) or (Signature).',
           'If no text is visible, return {"plainText":"(Not Readable)","layoutHtml":"<p>(Not Readable)</p>"}.',
+          'If you cannot confidently transcribe meaningful visible text, return {"plainText":"(Not Readable)","layoutHtml":"<p>(Not Readable)</p>"} instead of guessing.',
+          'Do not return blank JSON, newline-only content, escape-sequence padding, or one-letter placeholders.',
+          'Use only meaningful line breaks; do not use repeated escaped newlines to imitate vertical spacing.',
         ].join(' '),
       },
       {
@@ -794,6 +802,7 @@ async function ocrImageBuffer(imageBuffer: Buffer, pageNumber: number, mimeType:
               `Transcribe page ${pageNumber} exactly for a legal Type Copy.`,
               'Return a JSON object with this exact shape:',
               '{"plainText":"...","layoutHtml":"..."}',
+              'Never fill plainText or layoutHtml with repeated \\n characters or placeholder letters.',
             ].join(' '),
           },
           {
@@ -810,7 +819,7 @@ async function ocrImageBuffer(imageBuffer: Buffer, pageNumber: number, mimeType:
       type: 'json_schema',
       json_schema: {
         name: 'type_copy_layout_page',
-        strict: false,
+        strict: true,
         schema: typeCopySinglePageLayoutSchema(),
       },
     },
@@ -822,7 +831,7 @@ async function ocrImageBuffer(imageBuffer: Buffer, pageNumber: number, mimeType:
   const content = completion.choices[0]?.message?.content || '';
   const parsed = parseOcrLayout(content);
 
-  if (!parsed.text || parsed.text === '(Not Readable)') {
+  if (!isUsableOcrText(parsed.text)) {
     return { text: '', layoutHtml: '' };
   }
 
@@ -930,10 +939,34 @@ function normalizeExtractedText(text: string) {
   return cleaned.trim().length ? cleaned : '';
 }
 
+function looksLikeStructuredOcrJson(raw: string) {
+  const text = stripCodeFences(raw).trim();
+  return text.startsWith('{') && /["']?(?:plainText|layoutHtml|pages)["']?\s*:/i.test(text);
+}
+
+function isNotReadableText(text: string) {
+  return /^\(?not\s+readable\)?$/i.test(normalizeExtractedText(text));
+}
+
+function isUsableOcrText(text: string) {
+  const normalized = normalizeExtractedText(text);
+  if (!normalized || isNotReadableText(normalized)) return false;
+
+  const signalChars = normalized.match(/[\p{L}\p{N}]/gu) || [];
+  if (signalChars.length < minimumMeaningfulOcrChars) return false;
+
+  const uniqueSignalChars = new Set(signalChars.map((char) => char.toLocaleLowerCase()));
+  return !(signalChars.length < 12 && uniqueSignalChars.size <= 1);
+}
+
 function parseOcrLayout(raw: string): OcrLayout {
+  const stripped = stripCodeFences(raw);
+
   try {
-    const parsed = JSON.parse(stripCodeFences(raw));
+    const parsed = JSON.parse(stripped);
     const text = normalizeExtractedText(parsed.plainText || parsed.text || '');
+    if (!isUsableOcrText(text)) return { text: '', layoutHtml: '' };
+
     const layoutHtml = sanitizeLayoutHtml(parsed.layoutHtml || '');
 
     return {
@@ -941,7 +974,11 @@ function parseOcrLayout(raw: string): OcrLayout {
       layoutHtml: layoutHtml || textToLayoutHtml(text),
     };
   } catch {
-    const text = normalizeExtractedText(stripCodeFences(raw));
+    if (looksLikeStructuredOcrJson(raw)) return { text: '', layoutHtml: '' };
+
+    const text = normalizeExtractedText(stripped);
+    if (!isUsableOcrText(text)) return { text: '', layoutHtml: '' };
+
     return {
       text,
       layoutHtml: textToLayoutHtml(text),
@@ -961,6 +998,8 @@ function parseOcrLayoutPages(raw: string, fallbackPageNumbers: number[]) {
       if (!fallbackPageNumbers.includes(pageNumber)) continue;
 
       const text = normalizeExtractedText(page.plainText || page.text || '');
+      if (!isUsableOcrText(text)) continue;
+
       const layoutHtml = sanitizeLayoutHtml(page.layoutHtml || '');
       pages.set(pageNumber, {
         text,
@@ -968,8 +1007,9 @@ function parseOcrLayoutPages(raw: string, fallbackPageNumbers: number[]) {
       });
     }
   } catch {
-    if (fallbackPageNumbers.length === 1) {
-      pages.set(fallbackPageNumbers[0], parseOcrLayout(raw));
+    if (fallbackPageNumbers.length === 1 && !looksLikeStructuredOcrJson(raw)) {
+      const layout = parseOcrLayout(raw);
+      if (isUsableOcrText(layout.text)) pages.set(fallbackPageNumbers[0], layout);
     }
   }
 
