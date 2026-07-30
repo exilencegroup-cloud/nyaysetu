@@ -19,6 +19,8 @@ const maxUploadSizeMb = 500;
 const maxUploadSizeBytes = maxUploadSizeMb * 1024 * 1024;
 const maxPdfPagesPerDocument = 1000;
 const maxScannedPagesPerBatch = 10;
+const maxRateLimitRetriesPerBatch = 12;
+const scannedBatchPauseMs = 2500;
 
 export function TypeCopyWorkspace() {
   const router = useRouter();
@@ -77,7 +79,12 @@ export function TypeCopyWorkspace() {
     setError('');
 
     try {
-      const { ok, payload } = await postTypeCopyFile(file);
+      const { ok, payload } = await postTypeCopyFileWithRateLimitRetry(
+        file,
+        {},
+        setProcessingMessage,
+        'this document',
+      );
 
       if (isChunkRequired(payload)) {
         const result = await generateBatchedTypeCopy(file, payload, setProcessingMessage);
@@ -219,17 +226,20 @@ export function TypeCopyWorkspace() {
   );
 }
 
+type TypeCopyFailurePayload = {
+  success: false;
+  message: string;
+  code?: 'chunk_required' | 'page_limit_exceeded' | 'ocr_rate_limited' | 'ocr_quota_exceeded';
+  pageCount?: number;
+  chunkSize?: number;
+  maxPageCount?: number;
+  scanned?: boolean;
+  retryAfterSeconds?: number;
+};
+
 type TypeCopyApiPayload =
   | { success: true; data: TypeCopyResult; message?: string }
-  | {
-    success: false;
-    message: string;
-    code?: 'chunk_required' | 'page_limit_exceeded';
-    pageCount?: number;
-    chunkSize?: number;
-    maxPageCount?: number;
-    scanned?: boolean;
-  };
+  | TypeCopyFailurePayload;
 
 async function postTypeCopyFile(file: File, fields: Record<string, string | number> = {}) {
   const formData = new FormData();
@@ -266,13 +276,15 @@ async function generateBatchedTypeCopy(
   }
 
   let chunkSize = normalizeChunkSize(initialPayload.chunkSize || maxScannedPagesPerBatch, pageCount);
+  const scanned = initialPayload.scanned === true;
 
   while (true) {
     const pages: TypeCopyPage[] = [];
     let baseResult: TypeCopyResult | null = null;
-    let shouldRestart = false;
+    let start = 1;
+    let rateLimitRetriesForCurrentBatch = 0;
 
-    for (let start = 1; start <= pageCount; start += chunkSize) {
+    while (start <= pageCount) {
       const end = Math.min(pageCount, start + chunkSize - 1);
       setProgress(`Processing pages ${start}-${end} of ${pageCount}...`);
 
@@ -281,14 +293,35 @@ async function generateBatchedTypeCopy(
         pageEnd: end,
       });
 
+      if (isOcrRateLimited(payload)) {
+        rateLimitRetriesForCurrentBatch += 1;
+        if (rateLimitRetriesForCurrentBatch > maxRateLimitRetriesPerBatch) {
+          throw new Error('OpenAI OCR is still rate-limited. Please try again in a few minutes.');
+        }
+
+        const nextChunkSize = normalizeChunkSize(payload.chunkSize || Math.ceil(chunkSize / 2), pageCount);
+        if (nextChunkSize < chunkSize) chunkSize = nextChunkSize;
+
+        await waitForOcrRateLimit(
+          payload,
+          setProgress,
+          `pages ${start}-${Math.min(pageCount, start + chunkSize - 1)}`,
+          rateLimitRetriesForCurrentBatch,
+        );
+        continue;
+      }
+
+      if (isOcrQuotaExceeded(payload)) {
+        throw new Error(payload.message || 'OpenAI OCR credits are exhausted. Add API credits or adjust billing limits before trying again.');
+      }
+
       if (isChunkRequired(payload)) {
         const nextChunkSize = normalizeChunkSize(payload.chunkSize || maxScannedPagesPerBatch, pageCount);
 
         if (nextChunkSize < chunkSize) {
           chunkSize = nextChunkSize;
-          shouldRestart = true;
           setProgress(`Switching to ${chunkSize}-page OCR batches...`);
-          break;
+          continue;
         }
       }
 
@@ -298,9 +331,14 @@ async function generateBatchedTypeCopy(
 
       baseResult = baseResult || payload.data;
       pages.push(...payload.data.pages);
-    }
+      start = end + 1;
+      rateLimitRetriesForCurrentBatch = 0;
 
-    if (shouldRestart) continue;
+      if (scanned && start <= pageCount) {
+        setProgress('Preparing the next OCR batch...');
+        await sleep(scannedBatchPauseMs);
+      }
+    }
 
     if (!baseResult || pages.length === 0) {
       throw new Error('Unable to generate Type Copy.');
@@ -319,6 +357,27 @@ async function generateBatchedTypeCopy(
   }
 }
 
+async function postTypeCopyFileWithRateLimitRetry(
+  file: File,
+  fields: Record<string, string | number>,
+  setProgress: (message: string) => void,
+  label: string,
+) {
+  for (let attempt = 1; attempt <= maxRateLimitRetriesPerBatch + 1; attempt += 1) {
+    const result = await postTypeCopyFile(file, fields);
+
+    if (!isOcrRateLimited(result.payload)) return result;
+
+    if (attempt > maxRateLimitRetriesPerBatch) {
+      throw new Error('OpenAI OCR is still rate-limited. Please try again in a few minutes.');
+    }
+
+    await waitForOcrRateLimit(result.payload, setProgress, label, attempt);
+  }
+
+  throw new Error('Unable to generate Type Copy.');
+}
+
 function normalizeChunkSize(chunkSize: number, pageCount: number) {
   const parsed = Number(chunkSize);
   if (!Number.isFinite(parsed) || parsed < 1) return Math.min(maxScannedPagesPerBatch, pageCount);
@@ -327,6 +386,39 @@ function normalizeChunkSize(chunkSize: number, pageCount: number) {
 
 function isChunkRequired(payload: TypeCopyApiPayload): payload is Extract<TypeCopyApiPayload, { success: false }> {
   return payload.success === false && payload.code === 'chunk_required';
+}
+
+function isOcrRateLimited(payload: TypeCopyApiPayload): payload is TypeCopyFailurePayload & { code: 'ocr_rate_limited' } {
+  return payload.success === false && payload.code === 'ocr_rate_limited';
+}
+
+function isOcrQuotaExceeded(payload: TypeCopyApiPayload): payload is TypeCopyFailurePayload & { code: 'ocr_quota_exceeded' } {
+  return payload.success === false && payload.code === 'ocr_quota_exceeded';
+}
+
+async function waitForOcrRateLimit(
+  payload: TypeCopyFailurePayload & { code: 'ocr_rate_limited' },
+  setProgress: (message: string) => void,
+  label: string,
+  attempt = 1,
+) {
+  const retryAfterSeconds = rateLimitDelaySeconds(payload, attempt);
+  setProgress(`OpenAI OCR is busy. Retrying ${label} in ${retryAfterSeconds}s...`);
+  await sleep(retryAfterSeconds * 1000);
+}
+
+function rateLimitDelaySeconds(payload: TypeCopyFailurePayload & { code: 'ocr_rate_limited' }, attempt: number) {
+  const requestedDelay = Number(payload.retryAfterSeconds || 0);
+  const backoffDelay = 15 + Math.max(0, attempt - 1) * 10;
+  const delay = Math.max(requestedDelay, backoffDelay);
+
+  return Math.max(10, Math.min(Math.ceil(delay), 90));
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 async function readTypeCopyResponse(response: Response): Promise<TypeCopyApiPayload> {

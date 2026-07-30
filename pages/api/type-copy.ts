@@ -32,6 +32,8 @@ const maxOcrImageBytes = 18 * 1024 * 1024;
 const maxPdfPagesPerDocument = positiveNumber(process.env.TYPE_COPY_MAX_DOCUMENT_PAGES, 1000);
 const maxSynchronousScannedPages = positiveNumber(process.env.TYPE_COPY_MAX_SYNC_OCR_PAGES, 10);
 const maxSynchronousPdfPages = positiveNumber(process.env.TYPE_COPY_MAX_SYNC_PDF_PAGES, 120);
+const ocrRateLimitRetryAfterSeconds = positiveNumber(process.env.TYPE_COPY_OCR_RATE_LIMIT_RETRY_SECONDS, 25);
+const rateLimitedOcrChunkSize = positiveNumber(process.env.TYPE_COPY_RATE_LIMIT_OCR_CHUNK_PAGES, 3);
 const textLayerSampleThreshold = 40;
 const allowedLayoutHtmlTags = new Set(['div', 'p', 'span', 'br', 'strong', 'em', 'u', 'pre', 'table', 'thead', 'tbody', 'tr', 'th', 'td']);
 const allowedLayoutStyleProps = new Set([
@@ -71,11 +73,12 @@ type ApiResponse =
 type TypeCopyFailureResponse = {
   success: false;
   message: string;
-  code?: 'chunk_required' | 'page_limit_exceeded';
+  code?: 'chunk_required' | 'page_limit_exceeded' | 'ocr_rate_limited' | 'ocr_quota_exceeded';
   pageCount?: number;
   chunkSize?: number;
   maxPageCount?: number;
   scanned?: boolean;
+  retryAfterSeconds?: number;
 };
 
 interface PdfInfo {
@@ -476,6 +479,7 @@ async function ocrUnreadablePdfPages(
           page.status = 'ocr';
         }
       } catch (error) {
+        if (isOpenAiQuotaError(error) || isOpenAiRateLimitError(error)) throw error;
         if (isPdfRenderUnavailable(error)) {
           renderUnavailable = true;
           break;
@@ -514,6 +518,7 @@ async function ocrUnreadablePdfPageImages(buffer: Buffer, pages: TypeCopyPage[])
           page.status = 'ocr';
         }
       } catch (error) {
+        if (isOpenAiQuotaError(error) || isOpenAiRateLimitError(error)) throw error;
         console.error(`Embedded image OCR failed for page ${page.pageNumber}:`, error);
       }
     }
@@ -1125,8 +1130,26 @@ function typeCopyErrorResponse(error: any) {
     return { message: 'OpenAI OCR authentication failed. Check the production OPENAI_API_KEY.', statusCode: 500, body: {} };
   }
 
-  if (status === 429 || /rate limit/i.test(message)) {
-    return { message: 'OpenAI OCR rate limit reached. Try again in a little while.', statusCode: 429, body: {} };
+  if (isOpenAiQuotaError(error)) {
+    return {
+      message: 'OpenAI OCR credits are exhausted. Add API credits or adjust billing limits before trying again.',
+      statusCode: 429,
+      body: { code: 'ocr_quota_exceeded' as const },
+    };
+  }
+
+  if (isOpenAiRateLimitError(error)) {
+    const retryAfterSeconds = retryAfterSecondsFromError(error);
+    return {
+      message: 'OpenAI OCR is temporarily rate-limited. Type Copy will retry this batch automatically.',
+      statusCode: 429,
+      body: {
+        code: 'ocr_rate_limited' as const,
+        retryAfterSeconds,
+        chunkSize: Math.max(1, Math.min(rateLimitedOcrChunkSize, maxSynchronousScannedPages)),
+        scanned: true,
+      },
+    };
   }
 
   if (/timeout|timed out|ETIMEDOUT/i.test(message)) {
@@ -1143,4 +1166,55 @@ function typeCopyErrorResponse(error: any) {
 function positiveNumber(value: string | undefined, fallback: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function isOpenAiQuotaError(error: any) {
+  const message = String(error?.message || error?.error?.message || '');
+  const code = String(error?.code || error?.error?.code || '');
+  const type = String(error?.type || error?.error?.type || '');
+
+  return code === 'insufficient_quota'
+    || code === 'credit_balance_exhausted'
+    || type === 'insufficient_quota'
+    || /insufficient_quota|credit_balance_exhausted|exceeded your current quota|billing quota|run out of credits|no credits remaining|add credits|no balance left/i.test(message);
+}
+
+function isOpenAiRateLimitError(error: any) {
+  if (isOpenAiQuotaError(error)) return false;
+
+  const message = String(error?.message || error?.error?.message || '');
+  const code = String(error?.code || error?.error?.code || '');
+  const status = Number(error?.status || error?.statusCode || 0);
+
+  return status === 429 || code === 'rate_limit_exceeded' || /rate limit/i.test(message);
+}
+
+function retryAfterSecondsFromError(error: any) {
+  const rawRetryAfter = headerValue(error?.headers, 'retry-after')
+    || headerValue(error?.response?.headers, 'retry-after');
+
+  if (rawRetryAfter) {
+    const numeric = Number(rawRetryAfter);
+    if (Number.isFinite(numeric) && numeric > 0) return Math.ceil(numeric);
+
+    const retryDate = Date.parse(rawRetryAfter);
+    if (Number.isFinite(retryDate)) {
+      const seconds = Math.ceil((retryDate - Date.now()) / 1000);
+      if (seconds > 0) return seconds;
+    }
+  }
+
+  return ocrRateLimitRetryAfterSeconds;
+}
+
+function headerValue(headers: any, name: string) {
+  if (!headers) return '';
+  if (typeof headers.get === 'function') return headers.get(name) || '';
+
+  const lowerName = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === lowerName) return Array.isArray(value) ? String(value[0] || '') : String(value || '');
+  }
+
+  return '';
 }
