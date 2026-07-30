@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { AlertTriangle, ArrowLeft, Download, Eye, FileText, Pencil, Save, Stamp } from 'lucide-react';
@@ -6,8 +6,9 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Loader } from '@/components/ui/Loader';
 import { buildTypeCopyDocx, buildTypeCopyPdf } from '@/lib/typeCopyExport';
-import { formatBytes, type TypeCopyResult } from '@/lib/typeCopyDemo';
-import { loadTypeCopyResult, saveTypeCopyResult } from '@/lib/typeCopyStorage';
+import { buildTypeCopyDraftText, formatBytes, type TypeCopyResult } from '@/lib/typeCopyDemo';
+import { loadTypeCopyJob, loadTypeCopyResult, saveTypeCopyResult, type TypeCopyJob } from '@/lib/typeCopyStorage';
+import { runTypeCopyJob } from '@/lib/typeCopyJobRunner';
 
 export default function TypeCopyResultsPage() {
   const router = useRouter();
@@ -17,8 +18,16 @@ export default function TypeCopyResultsPage() {
   const [approvedAt, setApprovedAt] = useState('');
   const [message, setMessage] = useState('');
   const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit');
+  const [activeJob, setActiveJob] = useState<TypeCopyJob | null>(null);
+  const [draftDirty, setDraftDirty] = useState(false);
+  const runnerActiveRef = useRef(false);
+  const draftDirtyRef = useRef(false);
 
   const pageCount = result?.pageCount || result?.pages?.length || 0;
+  const processing = result?.processing;
+  const processingActive = processing?.status === 'queued' || processing?.status === 'processing';
+  const completedPageCount = result?.pages?.length || 0;
+  const progressPercent = pageCount ? Math.min(100, Math.round((completedPageCount / pageCount) * 100)) : 0;
   const unreadableCount = useMemo(() => {
     if (result?.pages?.length) {
       return result.pages.filter((page) => page.status === 'not_readable').length;
@@ -33,13 +42,14 @@ export default function TypeCopyResultsPage() {
   useEffect(() => {
     let active = true;
 
-    loadTypeCopyResult()
-      .then((stored) => {
+    Promise.all([loadTypeCopyResult(), loadTypeCopyJob()])
+      .then(([stored, job]) => {
         if (!active) return;
         if (!stored) return;
 
         setResult(stored);
         setDraft(stored.draftText);
+        setActiveJob(job && job.status !== 'complete' ? job : null);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -50,17 +60,67 @@ export default function TypeCopyResultsPage() {
     };
   }, []);
 
+  useEffect(() => {
+    draftDirtyRef.current = draftDirty;
+  }, [draftDirty]);
+
+  useEffect(() => {
+    if (loading || !result || !activeJob || runnerActiveRef.current) return;
+    if (activeJob.status === 'complete' || activeJob.status === 'failed') return;
+
+    let cancelled = false;
+    runnerActiveRef.current = true;
+
+    runTypeCopyJob(activeJob, result, {
+      shouldStop: () => cancelled,
+      onUpdate: (nextResult, nextJob) => {
+        setResult(nextResult);
+        setActiveJob(nextJob);
+        setMessage(nextResult.processing?.message || '');
+
+        if (!draftDirtyRef.current) {
+          setDraft(nextResult.draftText);
+        }
+      },
+    })
+      .then((nextResult) => {
+        if (!nextResult || cancelled) return;
+        setResult(nextResult);
+        setActiveJob(null);
+        setMessage('Type Copy processing complete.');
+        if (!draftDirtyRef.current) setDraft(nextResult.draftText);
+      })
+      .catch((error: any) => {
+        if (cancelled) return;
+        setMessage(error.message || 'Type Copy processing stopped.');
+      })
+      .finally(() => {
+        runnerActiveRef.current = false;
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loading]);
+
   async function saveDraft() {
     if (!result) return;
     const nextResult = buildPreviewResultFromDraft(result, draft);
     await saveTypeCopyResult(nextResult);
     setResult(nextResult);
+    setDraft(nextResult.draftText);
+    setDraftDirty(false);
     setApprovedAt('');
     setViewMode('preview');
     setMessage('Changes saved and preview updated.');
   }
 
   function approve() {
+    if (processingActive) {
+      setMessage('Type Copy is still processing. You can review completed pages now and approve after all pages finish.');
+      return;
+    }
+
     const timestamp = new Date().toLocaleString([], {
       year: 'numeric',
       month: 'short',
@@ -75,7 +135,7 @@ export default function TypeCopyResultsPage() {
   function exportFile(format: 'docx' | 'pdf') {
     if (!result) return;
     if (!approvedAt) {
-      setMessage('Approve the Type Copy before export.');
+      setMessage(processingActive ? 'Wait for all pages to finish before export.' : 'Approve the Type Copy before export.');
       return;
     }
 
@@ -236,6 +296,36 @@ export default function TypeCopyResultsPage() {
             </aside>
 
             <section className="grid gap-5">
+              {processing ? (
+                <Card padding="md">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-xs uppercase tracking-[0.16em] text-accent font-semibold">
+                        {processing.status === 'failed' ? 'Processing stopped' : processingActive ? 'Processing live' : 'Processing complete'}
+                      </p>
+                      <h2 className="mt-2 text-lg font-serif font-semibold text-primary">
+                        {completedPageCount} of {pageCount} pages ready
+                      </h2>
+                      <p className={`mt-1 text-sm ${processing.status === 'failed' ? 'text-red-600' : 'text-secondary'}`}>
+                        {processing.error || processing.message || 'Completed pages appear here while OCR continues.'}
+                      </p>
+                    </div>
+                    {processingActive ? (
+                      <div className="flex items-center gap-3 text-sm text-secondary">
+                        <Loader size="sm" color="accent" />
+                        <span>Batch size: {processing.chunkSize} page{processing.chunkSize === 1 ? '' : 's'}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-border">
+                    <div
+                      className="h-full rounded-full bg-accent transition-all duration-500"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                </Card>
+              ) : null}
+
               <Card padding="lg">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
@@ -277,6 +367,7 @@ export default function TypeCopyResultsPage() {
                     value={draft}
                     onChange={(event) => {
                       setDraft(event.target.value);
+                      setDraftDirty(true);
                       setApprovedAt('');
                       setMessage('Unsaved changes.');
                     }}
@@ -308,6 +399,14 @@ export default function TypeCopyResultsPage() {
                             />
                           </article>
                         ))}
+                        {processingActive ? (
+                          <article className="mx-auto flex min-h-[16rem] w-full min-w-[44rem] max-w-[52rem] items-center justify-center border border-dashed border-border bg-card p-8 text-center text-secondary">
+                            <div>
+                              <Loader size="md" color="accent" />
+                              <p className="mt-4 text-sm">More pages are being processed...</p>
+                            </div>
+                          </article>
+                        ) : null}
                       </div>
                     ) : (
                       <pre className="font-mono text-sm leading-6 text-primary" style={{ tabSize: 4 }}>
@@ -325,11 +424,11 @@ export default function TypeCopyResultsPage() {
                     <p className="mt-1 text-sm text-secondary">Approve once review is complete, then export DOCX or PDF.</p>
                   </div>
                   <div className="flex flex-col gap-3 sm:flex-row">
-                    <Button onClick={() => exportFile('docx')} disabled={!approvedAt}>
+                    <Button onClick={() => exportFile('docx')} disabled={!approvedAt || processingActive}>
                       <FileText size={16} className="mr-2" />
                       Export DOCX
                     </Button>
-                    <Button onClick={() => exportFile('pdf')} variant="secondary" disabled={!approvedAt}>
+                    <Button onClick={() => exportFile('pdf')} variant="secondary" disabled={!approvedAt || processingActive}>
                       <Download size={16} className="mr-2" />
                       Export PDF
                     </Button>
@@ -390,9 +489,15 @@ function buildPreviewResultFromDraft(result: TypeCopyResult, draft: string): Typ
 
   return {
     ...result,
-    draftText: draft,
+    draftText: buildTypeCopyDraftText(result.fileName, result.documentId, pages, result.pageCount),
     pages,
-    pageCount: pages.length,
+    pageCount: result.pageCount,
+    processing: result.processing
+      ? {
+        ...result.processing,
+        processedPages: pages.length,
+      }
+      : result.processing,
   };
 }
 

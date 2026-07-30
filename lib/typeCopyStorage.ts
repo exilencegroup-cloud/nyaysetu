@@ -3,7 +3,27 @@ import { type TypeCopyResult, typeCopyStorageKey } from './typeCopyDemo';
 const dbName = 'nyaysetu_type_copy';
 const storeName = 'results';
 const latestKey = 'latest';
+const latestJobKey = 'latest_job';
 const indexedDbMarker = '__indexeddb__';
+
+export interface TypeCopyJob {
+  jobId: string;
+  file: File;
+  fileName: string;
+  fileSize: number;
+  extension: string;
+  documentId: string;
+  pageCount: number;
+  chunkSize: number;
+  scanned: boolean;
+  nextPage: number;
+  status: 'queued' | 'processing' | 'complete' | 'failed';
+  retryCount: number;
+  message?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 function hasIndexedDb() {
   return typeof window !== 'undefined' && 'indexedDB' in window;
@@ -102,4 +122,39 @@ export async function clearTypeCopyResult() {
   }
 
   window.localStorage.removeItem(typeCopyStorageKey);
+}
+
+export async function saveTypeCopyJob(job: TypeCopyJob) {
+  if (!hasIndexedDb()) {
+    throw new Error('This browser cannot keep Type Copy running after navigation.');
+  }
+
+  const db = await openTypeCopyDb();
+  try {
+    await writeStore(db, (store) => store.put(job, latestJobKey));
+  } finally {
+    db.close();
+  }
+}
+
+export async function loadTypeCopyJob(): Promise<TypeCopyJob | null> {
+  if (!hasIndexedDb()) return null;
+
+  const db = await openTypeCopyDb();
+  try {
+    return await readStore<TypeCopyJob | undefined>(db, (store) => store.get(latestJobKey)) || null;
+  } finally {
+    db.close();
+  }
+}
+
+export async function clearTypeCopyJob() {
+  if (!hasIndexedDb()) return;
+
+  const db = await openTypeCopyDb();
+  try {
+    await writeStore(db, (store) => store.delete(latestJobKey));
+  } finally {
+    db.close();
+  }
 }

@@ -6,21 +6,24 @@ import { Card } from '@/components/ui/Card';
 import { Loader } from '@/components/ui/Loader';
 import {
   buildTypeCopyDraftText,
+  documentIdFor,
   extensionFor,
   formatBytes,
   supportedTypeCopyExtensions,
-  type TypeCopyPage,
-  type TypeCopyResult,
 } from '@/lib/typeCopyDemo';
-import { saveTypeCopyResult } from '@/lib/typeCopyStorage';
+import { clearTypeCopyJob, saveTypeCopyJob, saveTypeCopyResult } from '@/lib/typeCopyStorage';
+import {
+  isChunkRequired,
+  normalizeChunkSize,
+  postTypeCopyFileWithRateLimitRetry,
+} from '@/lib/typeCopyClient';
 import { cn } from '@/lib/utils';
 
 const maxUploadSizeMb = 500;
 const maxUploadSizeBytes = maxUploadSizeMb * 1024 * 1024;
 const maxPdfPagesPerDocument = 1000;
 const maxScannedPagesPerBatch = 10;
-const maxRateLimitRetriesPerBatch = 12;
-const scannedBatchPauseMs = 2500;
+const preferredScannedPagesPerBatch = 3;
 
 export function TypeCopyWorkspace() {
   const router = useRouter();
@@ -87,9 +90,8 @@ export function TypeCopyWorkspace() {
       );
 
       if (isChunkRequired(payload)) {
-        const result = await generateBatchedTypeCopy(file, payload, setProcessingMessage);
-        setProcessingMessage('Saving Type Copy preview...');
-        await saveTypeCopyResult(result);
+        setProcessingMessage('Opening Type Copy preview...');
+        await createBackgroundTypeCopyJob(file, payload);
         router.push('/type-copy-results');
         return;
       }
@@ -100,6 +102,7 @@ export function TypeCopyWorkspace() {
 
       setProcessingMessage('Saving Type Copy preview...');
       await saveTypeCopyResult(payload.data);
+      await clearTypeCopyJob();
       router.push('/type-copy-results');
     } catch (err: any) {
       setError(err.message || 'Unable to generate Type Copy.');
@@ -226,45 +229,15 @@ export function TypeCopyWorkspace() {
   );
 }
 
-type TypeCopyFailurePayload = {
-  success: false;
-  message: string;
-  code?: 'chunk_required' | 'page_limit_exceeded' | 'ocr_rate_limited' | 'ocr_quota_exceeded';
-  pageCount?: number;
-  chunkSize?: number;
-  maxPageCount?: number;
-  scanned?: boolean;
-  retryAfterSeconds?: number;
-};
-
-type TypeCopyApiPayload =
-  | { success: true; data: TypeCopyResult; message?: string }
-  | TypeCopyFailurePayload;
-
-async function postTypeCopyFile(file: File, fields: Record<string, string | number> = {}) {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  for (const [key, value] of Object.entries(fields)) {
-    formData.append(key, String(value));
-  }
-
-  const response = await fetch('/api/type-copy', {
-    method: 'POST',
-    body: formData,
-  });
-
-  return {
-    ok: response.ok,
-    status: response.status,
-    payload: await readTypeCopyResponse(response),
-  };
-}
-
-async function generateBatchedTypeCopy(
+async function createBackgroundTypeCopyJob(
   file: File,
-  initialPayload: Extract<TypeCopyApiPayload, { success: false }>,
-  setProgress: (message: string) => void,
+  initialPayload: {
+    success: false;
+    message: string;
+    pageCount?: number;
+    chunkSize?: number;
+    scanned?: boolean;
+  },
 ) {
   const pageCount = Number(initialPayload.pageCount || 0);
   if (!Number.isFinite(pageCount) || pageCount < 1) {
@@ -275,189 +248,64 @@ async function generateBatchedTypeCopy(
     throw new Error(`This PDF has ${pageCount} pages. Type Copy supports up to ${maxPdfPagesPerDocument} pages per document.`);
   }
 
-  let chunkSize = normalizeChunkSize(initialPayload.chunkSize || maxScannedPagesPerBatch, pageCount);
   const scanned = initialPayload.scanned === true;
-
-  while (true) {
-    const pages: TypeCopyPage[] = [];
-    let baseResult: TypeCopyResult | null = null;
-    let start = 1;
-    let rateLimitRetriesForCurrentBatch = 0;
-
-    while (start <= pageCount) {
-      const end = Math.min(pageCount, start + chunkSize - 1);
-      setProgress(`Processing pages ${start}-${end} of ${pageCount}...`);
-
-      const { ok, payload } = await postTypeCopyFile(file, {
-        pageStart: start,
-        pageEnd: end,
-      });
-
-      if (isOcrRateLimited(payload)) {
-        rateLimitRetriesForCurrentBatch += 1;
-        if (rateLimitRetriesForCurrentBatch > maxRateLimitRetriesPerBatch) {
-          throw new Error('OpenAI OCR is still rate-limited. Please try again in a few minutes.');
-        }
-
-        const nextChunkSize = normalizeChunkSize(payload.chunkSize || Math.ceil(chunkSize / 2), pageCount);
-        if (nextChunkSize < chunkSize) chunkSize = nextChunkSize;
-
-        await waitForOcrRateLimit(
-          payload,
-          setProgress,
-          `pages ${start}-${Math.min(pageCount, start + chunkSize - 1)}`,
-          rateLimitRetriesForCurrentBatch,
-        );
-        continue;
-      }
-
-      if (isOcrQuotaExceeded(payload)) {
-        throw new Error(payload.message || 'OpenAI OCR credits are exhausted. Add API credits or adjust billing limits before trying again.');
-      }
-
-      if (isChunkRequired(payload)) {
-        const nextChunkSize = normalizeChunkSize(payload.chunkSize || maxScannedPagesPerBatch, pageCount);
-
-        if (nextChunkSize < chunkSize) {
-          chunkSize = nextChunkSize;
-          setProgress(`Switching to ${chunkSize}-page OCR batches...`);
-          continue;
-        }
-      }
-
-      if (!ok || !payload.success) {
-        throw new Error(payload.message || `Unable to process pages ${start}-${end}.`);
-      }
-
-      baseResult = baseResult || payload.data;
-      pages.push(...payload.data.pages);
-      start = end + 1;
-      rateLimitRetriesForCurrentBatch = 0;
-
-      if (scanned && start <= pageCount) {
-        setProgress('Preparing the next OCR batch...');
-        await sleep(scannedBatchPauseMs);
-      }
-    }
-
-    if (!baseResult || pages.length === 0) {
-      throw new Error('Unable to generate Type Copy.');
-    }
-
-    const sortedPages = Array.from(
-      new Map(pages.map((page) => [page.pageNumber, page])).values(),
-    ).sort((a, b) => a.pageNumber - b.pageNumber);
-
-    return {
-      ...baseResult,
-      pageCount,
-      pages: sortedPages,
-      draftText: buildTypeCopyDraftText(baseResult.fileName, baseResult.documentId, sortedPages, pageCount),
-    };
-  }
-}
-
-async function postTypeCopyFileWithRateLimitRetry(
-  file: File,
-  fields: Record<string, string | number>,
-  setProgress: (message: string) => void,
-  label: string,
-) {
-  for (let attempt = 1; attempt <= maxRateLimitRetriesPerBatch + 1; attempt += 1) {
-    const result = await postTypeCopyFile(file, fields);
-
-    if (!isOcrRateLimited(result.payload)) return result;
-
-    if (attempt > maxRateLimitRetriesPerBatch) {
-      throw new Error('OpenAI OCR is still rate-limited. Please try again in a few minutes.');
-    }
-
-    await waitForOcrRateLimit(result.payload, setProgress, label, attempt);
-  }
-
-  throw new Error('Unable to generate Type Copy.');
-}
-
-function normalizeChunkSize(chunkSize: number, pageCount: number) {
-  const parsed = Number(chunkSize);
-  if (!Number.isFinite(parsed) || parsed < 1) return Math.min(maxScannedPagesPerBatch, pageCount);
-  return Math.max(1, Math.min(Math.floor(parsed), pageCount));
-}
-
-function isChunkRequired(payload: TypeCopyApiPayload): payload is Extract<TypeCopyApiPayload, { success: false }> {
-  return payload.success === false && payload.code === 'chunk_required';
-}
-
-function isOcrRateLimited(payload: TypeCopyApiPayload): payload is TypeCopyFailurePayload & { code: 'ocr_rate_limited' } {
-  return payload.success === false && payload.code === 'ocr_rate_limited';
-}
-
-function isOcrQuotaExceeded(payload: TypeCopyApiPayload): payload is TypeCopyFailurePayload & { code: 'ocr_quota_exceeded' } {
-  return payload.success === false && payload.code === 'ocr_quota_exceeded';
-}
-
-async function waitForOcrRateLimit(
-  payload: TypeCopyFailurePayload & { code: 'ocr_rate_limited' },
-  setProgress: (message: string) => void,
-  label: string,
-  attempt = 1,
-) {
-  const retryAfterSeconds = rateLimitDelaySeconds(payload, attempt);
-  setProgress(`OpenAI OCR is busy. Retrying ${label} in ${retryAfterSeconds}s...`);
-  await sleep(retryAfterSeconds * 1000);
-}
-
-function rateLimitDelaySeconds(payload: TypeCopyFailurePayload & { code: 'ocr_rate_limited' }, attempt: number) {
-  const requestedDelay = Number(payload.retryAfterSeconds || 0);
-  const backoffDelay = 15 + Math.max(0, attempt - 1) * 10;
-  const delay = Math.max(requestedDelay, backoffDelay);
-
-  return Math.max(10, Math.min(Math.ceil(delay), 90));
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
+  const fallbackChunkSize = scanned ? preferredScannedPagesPerBatch : maxScannedPagesPerBatch;
+  const serverChunkSize = normalizeChunkSize(initialPayload.chunkSize || fallbackChunkSize, pageCount, fallbackChunkSize);
+  const chunkSize = scanned
+    ? Math.min(serverChunkSize, preferredScannedPagesPerBatch)
+    : serverChunkSize;
+  const now = new Date().toLocaleString([], {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   });
-}
+  const updatedAt = new Date().toISOString();
+  const documentId = documentIdFor(file.name);
+  const extension = extensionFor(file.name);
+  const jobId = `typecopy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const message = scanned
+    ? `OCR started. First ${chunkSize} pages will appear shortly.`
+    : `Processing started. First ${chunkSize} pages will appear shortly.`;
 
-async function readTypeCopyResponse(response: Response): Promise<TypeCopyApiPayload> {
-  const contentType = response.headers.get('content-type') || '';
-  const body = await response.text();
+  await saveTypeCopyResult({
+    fileName: file.name,
+    fileSize: file.size,
+    extension,
+    documentId,
+    processedAt: now,
+    pageCount,
+    pages: [],
+    draftText: buildTypeCopyDraftText(file.name, documentId, [], pageCount),
+    processing: {
+      jobId,
+      status: 'queued',
+      processedPages: 0,
+      totalPages: pageCount,
+      nextPage: 1,
+      chunkSize,
+      scanned,
+      message,
+      updatedAt,
+    },
+  });
 
-  if (contentType.includes('application/json')) {
-    try {
-      return JSON.parse(body) as TypeCopyApiPayload;
-    } catch {
-      return {
-        success: false,
-        message: 'The server returned an unreadable response. Please try again.',
-      };
-    }
-  }
-
-  const message = readableServerMessage(body);
-
-  return {
-    success: false,
-    message: message || `Upload failed with server status ${response.status}.`,
-  };
-}
-
-function readableServerMessage(body: string) {
-  const cleaned = body
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  if (!cleaned) return '';
-  if (/FUNCTION_INVOCATION_TIMEOUT|timed out|timeout/i.test(cleaned)) {
-    return 'Type Copy took too long on the live server. Try again; long scanned PDFs are processed in smaller batches automatically.';
-  }
-
-  if (/body exceeded|payload too large|request entity too large|content length/i.test(cleaned)) {
-    return 'This file is too large for the live upload request. Upload a smaller file and try again.';
-  }
-
-  return cleaned.length > 180 ? `${cleaned.slice(0, 177)}...` : cleaned;
+  await saveTypeCopyJob({
+    jobId,
+    file,
+    fileName: file.name,
+    fileSize: file.size,
+    extension,
+    documentId,
+    pageCount,
+    chunkSize,
+    scanned,
+    nextPage: 1,
+    status: 'queued',
+    retryCount: 0,
+    message,
+    createdAt: updatedAt,
+    updatedAt,
+  });
 }

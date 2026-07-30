@@ -5,6 +5,19 @@ export interface TypeCopyPage {
   status: 'extracted' | 'ocr' | 'not_readable';
 }
 
+export interface TypeCopyProcessingState {
+  jobId: string;
+  status: 'queued' | 'processing' | 'complete' | 'failed';
+  processedPages: number;
+  totalPages: number;
+  nextPage: number;
+  chunkSize: number;
+  scanned: boolean;
+  message?: string;
+  error?: string;
+  updatedAt: string;
+}
+
 export interface TypeCopyResult {
   fileName: string;
   fileSize: number;
@@ -14,6 +27,7 @@ export interface TypeCopyResult {
   pageCount: number;
   pages: TypeCopyPage[];
   draftText: string;
+  processing?: TypeCopyProcessingState;
 }
 
 export const typeCopyStorageKey = 'nyaysetu_type_copy';
