@@ -13,9 +13,7 @@ import {
   documentIdFor,
   extensionFor,
   supportedTypeCopyExtensions,
-  type TypeCopyLayoutBlock,
   type TypeCopyPage,
-  type TypeCopyPageLayout,
   type TypeCopyResult,
 } from '@/lib/typeCopyDemo';
 
@@ -37,8 +35,6 @@ const maxSynchronousPdfPages = positiveNumber(process.env.TYPE_COPY_MAX_SYNC_PDF
 const ocrRateLimitRetryAfterSeconds = positiveNumber(process.env.TYPE_COPY_OCR_RATE_LIMIT_RETRY_SECONDS, 25);
 const rateLimitedOcrChunkSize = positiveNumber(process.env.TYPE_COPY_RATE_LIMIT_OCR_CHUNK_PAGES, 3);
 const minimumMeaningfulOcrChars = 4;
-const ocrLayoutPageWidth = 1000;
-const ocrLayoutPageHeight = 1414;
 const textLayerSampleThreshold = 40;
 const allowedLayoutHtmlTags = new Set(['div', 'p', 'span', 'br', 'strong', 'em', 'u', 'pre', 'table', 'thead', 'tbody', 'tr', 'th', 'td']);
 const allowedLayoutStyleProps = new Set([
@@ -62,12 +58,6 @@ const allowedLayoutStyleProps = new Set([
 interface OcrLayout {
   text: string;
   layoutHtml: string;
-  pageLayout?: TypeCopyPageLayout;
-}
-
-interface PageGeometry {
-  pageWidth: number;
-  pageHeight: number;
 }
 
 export const config = {
@@ -215,7 +205,6 @@ async function extractPdfPages(
       pageNumber,
       text,
       layoutHtml: text ? layout?.layoutHtml || textToLayoutHtml(text) : '',
-      pageLayout: layout?.pageLayout,
       status: text ? 'extracted' : 'not_readable',
     } satisfies TypeCopyPage;
   });
@@ -366,32 +355,25 @@ async function renderPageLayout(pageData: any): Promise<OcrLayout> {
     normalizeWhitespace: false,
     disableCombineTextItems: false,
   });
-  const viewport = pageData.getViewport(1);
-  const pageWidth = positiveFiniteNumber(viewport?.width, 612);
-  const pageHeight = positiveFiniteNumber(viewport?.height, 792);
 
   const items = (textContent.items || [])
     .map((item: any) => {
       const transform = Array.isArray(item.transform) ? item.transform : [];
-      const fontHeight = positiveFiniteNumber(Math.abs(Number(transform[3] || item.height || 0)), 10);
-      const x = Number(transform[4] || 0);
-      const baselineY = Number(transform[5] || 0);
-      const width = positiveFiniteNumber(Number(item.width || 0), String(item.str || '').length * fontHeight * 0.48);
-
       return {
         text: String(item.str || '').trim(),
-        x,
-        y: baselineY,
-        top: clamp(pageHeight - baselineY - fontHeight, 0, pageHeight),
-        width,
-        height: fontHeight,
+        x: Number(transform[4] || 0),
+        y: Number(transform[5] || 0),
       };
     })
     .filter((item: { text: string }) => item.text);
 
   if (items.length === 0) return { text: '', layoutHtml: '' };
 
-  const lineTolerance = 3.5;
+  const minX = Math.min(...items.map((item: { x: number }) => item.x));
+  const maxX = Math.max(...items.map((item: { x: number }) => item.x));
+  const span = Math.max(maxX - minX, 1);
+  const columns = 110;
+  const lineTolerance = 2.5;
   const lines: Array<{ y: number; items: typeof items }> = [];
 
   for (const item of items) {
@@ -404,37 +386,26 @@ async function renderPageLayout(pageData: any): Promise<OcrLayout> {
     }
   }
 
-  const blocks = lines
+  const text = lines
     .sort((a, b) => b.y - a.y)
-    .flatMap((line, lineIndex) => splitLineItemsIntoSegments(line.items, pageWidth).map((segment, segmentIndex) => {
-      const x = Math.min(...segment.map((item) => item.x));
-      const right = Math.max(...segment.map((item) => item.x + item.width));
-      const top = Math.min(...segment.map((item) => item.top));
-      const bottom = Math.max(...segment.map((item) => item.top + item.height));
-      const text = buildPositionedLineText(segment);
-      const width = Math.max(right - x, 1);
-      const height = Math.max(bottom - top, 1);
+    .map((line) => {
+      let output = '';
 
-      return {
-        id: `line-${lineIndex + 1}-${segmentIndex + 1}`,
-        text,
-        x: roundLayoutNumber(x),
-        y: roundLayoutNumber(top),
-        width: roundLayoutNumber(width),
-        height: roundLayoutNumber(height * 1.35),
-        align: inferTextBlockAlign(x, width, pageWidth),
-        kind: inferTextBlockKind(text, top, pageHeight, x, width, pageWidth),
-      } satisfies TypeCopyLayoutBlock;
-    }))
-    .filter((block) => block.text);
+      line.items
+        .sort((a, b) => a.x - b.x)
+        .forEach((item) => {
+          const column = Math.max(0, Math.round(((item.x - minX) / span) * columns));
+          const gap = Math.max(column - output.length, output ? 1 : 0);
+          output += `${' '.repeat(gap)}${item.text}`;
+        });
 
-  const pageLayout = normalizePageLayout({ pageWidth, pageHeight, blocks });
-  const text = textFromLayoutBlocks(pageLayout.blocks);
+      return output.trimEnd();
+    })
+    .join('\n');
 
   return {
     text,
-    layoutHtml: layoutHtmlFromPageLayout(pageLayout),
-    pageLayout,
+    layoutHtml: textToLayoutHtml(text),
   };
 }
 
@@ -458,7 +429,6 @@ async function extractImagePage(filePath: string, extension: string): Promise<Ty
       pageNumber: 1,
       text: layout.text,
       layoutHtml: layout.layoutHtml,
-      pageLayout: layout.pageLayout,
       status: layout.text ? 'ocr' : 'not_readable',
     },
   ];
@@ -504,7 +474,11 @@ async function ocrUnreadablePdfPages(
         const imagePath = await renderPdfPageToPng(pdfPath, page.pageNumber, tempDir);
         const layout = await ocrImageFile(imagePath, page.pageNumber, 'image/png');
 
-        applyOcrLayoutToPage(page, layout);
+        if (layout.text) {
+          page.text = layout.text;
+          page.layoutHtml = layout.layoutHtml;
+          page.status = 'ocr';
+        }
       } catch (error) {
         if (isOpenAiQuotaError(error) || isOpenAiRateLimitError(error)) throw error;
         if (isPdfRenderUnavailable(error)) {
@@ -539,7 +513,11 @@ async function ocrUnreadablePdfPageImages(buffer: Buffer, pages: TypeCopyPage[])
         handledAnyPage = true;
         const layout = await ocrImageBuffer(image, page.pageNumber, 'image/png');
 
-        applyOcrLayoutToPage(page, layout);
+        if (layout.text) {
+          page.text = layout.text;
+          page.layoutHtml = layout.layoutHtml;
+          page.status = 'ocr';
+        }
       } catch (error) {
         if (isOpenAiQuotaError(error) || isOpenAiRateLimitError(error)) throw error;
         console.error(`Embedded image OCR failed for page ${page.pageNumber}:`, error);
@@ -664,7 +642,13 @@ async function ocrPdfViaFileInput(pdfPath: string, fileName: string, pages: Type
 
       for (const page of chunk) {
         const layout = parsedPages.get(page.pageNumber);
-        applyOcrLayoutToPage(page, layout);
+        const text = normalizeExtractedText(layout?.text || '');
+
+        if (isUsableOcrText(text)) {
+          page.text = text;
+          page.layoutHtml = layout?.layoutHtml || textToLayoutHtml(text);
+          page.status = 'ocr';
+        }
       }
     }
   } finally {
@@ -682,18 +666,6 @@ function chunkPages(pages: TypeCopyPage[], size: number) {
   return chunks;
 }
 
-function applyOcrLayoutToPage(page: TypeCopyPage, layout?: OcrLayout) {
-  if (!layout) return;
-
-  const text = normalizeExtractedText(layout.text || '');
-  if (!isUsableOcrText(text)) return;
-
-  page.text = text;
-  page.layoutHtml = layout.layoutHtml || textToLayoutHtml(text);
-  page.pageLayout = layout.pageLayout;
-  page.status = 'ocr';
-}
-
 async function transcribePdfPageRange(fileId: string, fileName: string, pageNumbers: number[], totalPages: number) {
   const pageLabel = pageNumbers.length === 1
     ? `page ${pageNumbers[0]}`
@@ -705,21 +677,19 @@ async function transcribePdfPageRange(fileId: string, fileName: string, pageNumb
       'You convert scanned legal PDF pages into Type Copy with a formatted layout preview.',
       'Transcribe only visible text. Do not summarize, translate, explain, or add commentary.',
       'Return JSON only.',
-      'Detect visual regions first, then transcribe the text inside each region.',
-      'For every requested page, return layout.pageWidth 1000 and layout.pageHeight 1414, with block x, y, width, and height in that top-left-origin coordinate system.',
-      'Every heading, line, paragraph, list item, table region, footer, signature, stamp, and unreadable gap must be represented as a layout block at its approximate source position.',
-      'Centered titles must be header blocks with align center. Right-side dates, page numbers, advocate names, signature blocks, and verification blocks must be align right.',
-      'When the source has left and right content on the same visual row, return separate blocks with their own x positions instead of joining them into one left-aligned line.',
-      'Use kind table for every visible table or ruled grid. Preserve row order with line breaks and separate cells with tab characters in the block text.',
-      'Do not omit table cells because they are blank or hard to read; use (Unreadable) in unclear cells so the table shape remains visible.',
-      'For plainText, preserve human reading order, indentation, numbering, and practical line breaks.',
-      'Set layoutHtml to an empty string; the application reconstructs visual layout from layout blocks.',
-      'Do not flatten everything into left-aligned paragraphs.',
+      'For plainText, preserve paragraph order, indentation, numbering, and practical line breaks.',
+      'For layoutHtml, recreate the visual page layout using only these tags: div, p, span, br, strong, em, u, pre, table, thead, tbody, tr, th, td.',
+      'Every div or p in layoutHtml must include a style with text-align:left, text-align:center, or text-align:right based on where that block appears in the source page.',
+      'Centered titles must be separate blocks with style="text-align:center". Right-side dates, page numbers, advocate names, signature blocks, and verification blocks must be separate blocks with style="text-align:right".',
+      'When the source has left and right content on the same visual row, split it into separate aligned blocks or a two-column table so it does not become left-aligned text.',
+      'Use HTML tables for source tables, with rows, columns, cell order, borders, and blank cells preserved.',
+      'Use text-align:center/right, margin-left, and table cell padding/borders to preserve headings, dates, signature blocks, and indentation.',
+      'Do not flatten everything into left-aligned paragraphs. The layoutHtml must visually mimic the page.',
       'Do not return body, html, style, script, markdown, or code fences.',
-      'Mark unreadable words or characters as (Unreadable) at the exact location in the surrounding text.',
-      'If one table cell is unreadable, mark only that cell as (Unreadable).',
+      'Mark unreadable words as (Not Readable).',
+      'If one table cell is unreadable, mark only that cell as (Not Readable).',
       'Represent stamps, seals, and signatures as short markers such as (Seal) or (Signature).',
-      'If you cannot confidently transcribe meaningful visible text for a page, set that page to (Unreadable) instead of guessing.',
+      'If you cannot confidently transcribe meaningful visible text for a page, set that page to (Not Readable) instead of guessing.',
       'Do not return blank JSON, newline-only content, escape-sequence padding, or one-letter placeholders.',
       'Use only meaningful line breaks; do not use repeated escaped newlines to imitate vertical spacing.',
     ].join(' '),
@@ -734,9 +704,9 @@ async function transcribePdfPageRange(fileId: string, fileName: string, pageNumb
               `Transcribe ${pageLabel} only.`,
               `Requested page numbers: ${pageNumbers.join(', ')}.`,
               'Return a JSON object with this exact shape:',
-              `{"pages":[{"pageNumber":1,"plainText":"...","layoutHtml":"","layout":{"pageWidth":${ocrLayoutPageWidth},"pageHeight":${ocrLayoutPageHeight},"blocks":[{"id":"b1","text":"...","x":72,"y":90,"width":400,"height":24,"align":"left","kind":"paragraph"}]}}]}`,
+              '{"pages":[{"pageNumber":1,"plainText":"...","layoutHtml":"..."}]}',
               'Return the requested pages in order.',
-              'If a requested page has no readable text, set plainText to "(Unreadable)" and include one unreadable layout block at the visual unreadable area.',
+              'If a requested page has no readable text, set plainText to "(Not Readable)" and layoutHtml to "<p>(Not Readable)</p>".',
               'Never fill plainText or layoutHtml with repeated \\n characters or placeholder letters.',
             ].join(' '),
           },
@@ -782,15 +752,10 @@ async function ocrImageFile(imagePath: string, pageNumber: number, mimeType: str
   }
 
   const imageBuffer = await fs.promises.readFile(imagePath);
-  return ocrImageBuffer(imageBuffer, pageNumber, mimeType, readImageGeometry(imageBuffer));
+  return ocrImageBuffer(imageBuffer, pageNumber, mimeType);
 }
 
-async function ocrImageBuffer(
-  imageBuffer: Buffer,
-  pageNumber: number,
-  mimeType: string,
-  geometry = readImageGeometry(imageBuffer),
-): Promise<OcrLayout> {
+async function ocrImageBuffer(imageBuffer: Buffer, pageNumber: number, mimeType: string): Promise<OcrLayout> {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is required for scanned-page OCR.');
   }
@@ -798,10 +763,6 @@ async function ocrImageBuffer(
   if (imageBuffer.length > maxOcrImageBytes) {
     throw new Error('Image is too large for OCR.');
   }
-
-  const pageWidth = ocrLayoutPageWidth;
-  const pageHeight = ocrLayoutPageHeight;
-  const encodedImage = imageBuffer.toString('base64');
 
   const completion = await openai.chat.completions.create({
     model: typeCopyOcrModel,
@@ -814,22 +775,20 @@ async function ocrImageBuffer(
           'You convert scanned legal document pages into Type Copy with a formatted layout preview.',
           'Transcribe only visible text. Do not summarize or add commentary.',
           'Return JSON only.',
-          'Detect visual regions first, then transcribe the text inside each region.',
-          `Return layout.pageWidth ${pageWidth} and layout.pageHeight ${pageHeight}, with block x, y, width, and height in that top-left-origin coordinate system.`,
-          'Every heading, line, paragraph, list item, table region, footer, signature, stamp, and unreadable gap must be represented as a layout block at its approximate source position.',
-          'Centered titles must be header blocks with align center. Right-side dates, page numbers, advocate names, signature blocks, and verification blocks must be align right.',
-          'When the source has left and right content on the same visual row, return separate blocks with their own x positions instead of joining them into one left-aligned line.',
-          'Use kind table for every visible table or ruled grid. Preserve row order with line breaks and separate cells with tab characters in the block text.',
-          'Do not omit table cells because they are blank or hard to read; use (Unreadable) in unclear cells so the table shape remains visible.',
-          'For plainText, preserve human reading order, indentation, numbering, and practical line breaks.',
-          'Set layoutHtml to an empty string; the application reconstructs visual layout from layout blocks.',
-          'Do not flatten everything into left-aligned paragraphs.',
+          'For plainText, preserve paragraph order, indentation, numbering, and practical line breaks.',
+          'For layoutHtml, recreate the visual page layout using only these tags: div, p, span, br, strong, em, u, pre, table, thead, tbody, tr, th, td.',
+          'Every div or p in layoutHtml must include a style with text-align:left, text-align:center, or text-align:right based on where that block appears in the source page.',
+          'Centered titles must be separate blocks with style="text-align:center". Right-side dates, page numbers, advocate names, signature blocks, and verification blocks must be separate blocks with style="text-align:right".',
+          'When the source has left and right content on the same visual row, split it into separate aligned blocks or a two-column table so it does not become left-aligned text.',
+          'Use HTML tables for source tables, with rows, columns, cell order, borders, and blank cells preserved.',
+          'Use text-align:center/right, margin-left, and table cell padding/borders to preserve headings, dates, signature blocks, and indentation.',
+          'Do not flatten everything into left-aligned paragraphs. The layoutHtml must visually mimic the page.',
           'Do not return body, html, style, script, markdown, or code fences.',
-          'Mark unreadable words or characters as (Unreadable) at the exact location in the surrounding text.',
-          'If one table cell is unreadable, mark only that cell as (Unreadable).',
+          'Mark unreadable words as (Not Readable).',
+          'If one table cell is unreadable, mark only that cell as (Not Readable).',
           'Represent stamps, seals, and signatures as short markers such as (Seal) or (Signature).',
-          'If no text is visible, return plainText "(Unreadable)" and one unreadable layout block at the visual unreadable area.',
-          'If you cannot confidently transcribe meaningful visible text, return plainText "(Unreadable)" instead of guessing.',
+          'If no text is visible, return {"plainText":"(Not Readable)","layoutHtml":"<p>(Not Readable)</p>"}.',
+          'If you cannot confidently transcribe meaningful visible text, return {"plainText":"(Not Readable)","layoutHtml":"<p>(Not Readable)</p>"} instead of guessing.',
           'Do not return blank JSON, newline-only content, escape-sequence padding, or one-letter placeholders.',
           'Use only meaningful line breaks; do not use repeated escaped newlines to imitate vertical spacing.',
         ].join(' '),
@@ -842,14 +801,14 @@ async function ocrImageBuffer(
             text: [
               `Transcribe page ${pageNumber} exactly for a legal Type Copy.`,
               'Return a JSON object with this exact shape:',
-              `{"plainText":"...","layoutHtml":"","layout":{"pageWidth":${pageWidth},"pageHeight":${pageHeight},"blocks":[{"id":"b1","text":"...","x":72,"y":90,"width":400,"height":24,"align":"left","kind":"paragraph"}]}}`,
+              '{"plainText":"...","layoutHtml":"..."}',
               'Never fill plainText or layoutHtml with repeated \\n characters or placeholder letters.',
             ].join(' '),
           },
           {
             type: 'image_url',
             image_url: {
-              url: `data:${mimeType};base64,${encodedImage}`,
+              url: `data:${mimeType};base64,${imageBuffer.toString('base64')}`,
               detail: 'high',
             },
           },
@@ -969,321 +928,15 @@ function mimeTypeForExtension(extension: string) {
   return '';
 }
 
-function readImageGeometry(buffer: Buffer): PageGeometry {
-  if (buffer.length >= 24 && buffer.toString('ascii', 1, 4) === 'PNG') {
-    return {
-      pageWidth: positiveFiniteNumber(buffer.readUInt32BE(16), 1000),
-      pageHeight: positiveFiniteNumber(buffer.readUInt32BE(20), 1414),
-    };
-  }
-
-  const jpeg = readJpegGeometry(buffer);
-  if (jpeg) return jpeg;
-
-  return { pageWidth: 1000, pageHeight: 1414 };
-}
-
-function readJpegGeometry(buffer: Buffer): PageGeometry | null {
-  if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
-
-  let offset = 2;
-  while (offset + 9 < buffer.length) {
-    if (buffer[offset] !== 0xff) {
-      offset += 1;
-      continue;
-    }
-
-    const marker = buffer[offset + 1];
-    const length = buffer.readUInt16BE(offset + 2);
-    if (length < 2) return null;
-
-    if (marker >= 0xc0 && marker <= 0xc3) {
-      return {
-        pageWidth: positiveFiniteNumber(buffer.readUInt16BE(offset + 7), 1000),
-        pageHeight: positiveFiniteNumber(buffer.readUInt16BE(offset + 5), 1414),
-      };
-    }
-
-    offset += 2 + length;
-  }
-
-  return null;
-}
-
 function normalizeExtractedText(text: string) {
   const cleaned = text
     .replace(/\r\n?/g, '\n')
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
-    .replace(/\(\s*not\s+readable\s*\)/gi, '(Unreadable)')
-    .replace(/\(\s*unreadable\s*\)/gi, '(Unreadable)')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/^\n+|\n+$/g, '');
 
   return cleaned.trim().length ? cleaned : '';
-}
-
-function normalizeBlockText(text: string) {
-  return normalizeExtractedText(text)
-    .replace(/[ \t]{3,}/g, '  ')
-    .trim();
-}
-
-function textFromLayoutBlocks(blocks: TypeCopyLayoutBlock[]) {
-  return blocks
-    .slice()
-    .sort((a, b) => Math.abs(a.y - b.y) < 6 ? a.x - b.x : a.y - b.y)
-    .map((block) => block.text)
-    .filter(Boolean)
-    .join('\n');
-}
-
-function buildPositionedLineText(items: Array<{ text: string; x: number; width: number; height: number }>) {
-  let output = '';
-  let lastRight = items[0]?.x || 0;
-  const averageHeight = items.reduce((sum, item) => sum + item.height, 0) / Math.max(items.length, 1);
-  const spaceWidth = Math.max(averageHeight * 0.42, 3);
-
-  for (const item of items) {
-    if (output) {
-      const gap = item.x - lastRight;
-      output += ' '.repeat(gap > spaceWidth ? Math.min(16, Math.max(1, Math.round(gap / spaceWidth))) : 1);
-    }
-
-    output += item.text;
-    lastRight = item.x + item.width;
-  }
-
-  return normalizeBlockText(output);
-}
-
-function splitLineItemsIntoSegments(
-  items: Array<{ text: string; x: number; width: number; height: number; top: number; y: number }>,
-  pageWidth: number,
-) {
-  const sortedItems = items.slice().sort((a, b) => a.x - b.x);
-  const segments: typeof sortedItems[] = [];
-  let current: typeof sortedItems = [];
-  let lastRight = 0;
-  const averageHeight = sortedItems.reduce((sum, item) => sum + item.height, 0) / Math.max(sortedItems.length, 1);
-  const splitGap = Math.max(pageWidth * 0.08, averageHeight * 5);
-
-  for (const item of sortedItems) {
-    if (current.length && item.x - lastRight > splitGap) {
-      segments.push(current);
-      current = [];
-    }
-
-    current.push(item);
-    lastRight = item.x + item.width;
-  }
-
-  if (current.length) segments.push(current);
-  return segments;
-}
-
-function normalizePageLayout(raw: any): TypeCopyPageLayout {
-  const rawBlocks = Array.isArray(raw?.blocks) ? raw.blocks : [];
-  const metrics = layoutBlockMetrics(rawBlocks);
-  const rawPageWidth = clamp(positiveFiniteNumber(Number(raw?.pageWidth), ocrLayoutPageWidth), 100, 10000);
-  const rawPageHeight = clamp(positiveFiniteNumber(Number(raw?.pageHeight), ocrLayoutPageHeight), 100, 20000);
-  const useCanonicalScale = shouldUseCanonicalLayoutScale(rawPageWidth, rawPageHeight, metrics);
-  const pageWidth = useCanonicalScale ? ocrLayoutPageWidth : rawPageWidth;
-  const pageHeight = useCanonicalScale ? ocrLayoutPageHeight : rawPageHeight;
-  const blocks = rawBlocks
-    .slice(0, 180)
-    .map((block: any, index: number) => normalizeLayoutBlock(block, index, pageWidth, pageHeight))
-    .filter((block: TypeCopyLayoutBlock | null): block is TypeCopyLayoutBlock => Boolean(block))
-    .sort((a: TypeCopyLayoutBlock, b: TypeCopyLayoutBlock) => Math.abs(a.y - b.y) < 6 ? a.x - b.x : a.y - b.y);
-
-  return { pageWidth, pageHeight, blocks };
-}
-
-function layoutBlockMetrics(blocks: any[]) {
-  let maxRight = 0;
-  let maxBottom = 0;
-
-  for (const block of blocks) {
-    const x = Number(block?.x || 0);
-    const y = Number(block?.y || 0);
-    const width = Number(block?.width || 0);
-    const height = Number(block?.height || 0);
-
-    if (Number.isFinite(x) && Number.isFinite(width)) maxRight = Math.max(maxRight, x + width);
-    if (Number.isFinite(y) && Number.isFinite(height)) maxBottom = Math.max(maxBottom, y + height);
-  }
-
-  return { maxRight, maxBottom };
-}
-
-function shouldUseCanonicalLayoutScale(
-  pageWidth: number,
-  pageHeight: number,
-  metrics: { maxRight: number; maxBottom: number },
-) {
-  return pageWidth > ocrLayoutPageWidth * 1.45
-    && pageHeight > ocrLayoutPageHeight * 1.45
-    && metrics.maxRight > 0
-    && metrics.maxBottom > 0
-    && metrics.maxRight <= ocrLayoutPageWidth * 1.15
-    && metrics.maxBottom <= ocrLayoutPageHeight * 1.15;
-}
-
-function normalizeLayoutBlock(block: any, index: number, pageWidth: number, pageHeight: number): TypeCopyLayoutBlock | null {
-  const text = normalizeBlockText(String(block?.text || ''));
-  if (!text) return null;
-
-  const x = clamp(positiveFiniteNumber(Number(block?.x), 0), 0, pageWidth);
-  const y = clamp(positiveFiniteNumber(Number(block?.y), 0), 0, pageHeight);
-  const width = clamp(positiveFiniteNumber(Number(block?.width), pageWidth - x), 1, Math.max(1, pageWidth - x));
-  const height = clamp(positiveFiniteNumber(Number(block?.height), 18), 1, Math.max(1, pageHeight - y));
-  const align = normalizeBlockAlign(block?.align);
-  const kind = normalizeBlockKind(block?.kind, text);
-
-  return {
-    id: sanitizeBlockId(String(block?.id || `block-${index + 1}`), index),
-    text,
-    x: roundLayoutNumber(x),
-    y: roundLayoutNumber(y),
-    width: roundLayoutNumber(width),
-    height: roundLayoutNumber(height),
-    align,
-    kind,
-  };
-}
-
-function normalizeBlockAlign(value: any): TypeCopyLayoutBlock['align'] {
-  return value === 'center' || value === 'right' ? value : 'left';
-}
-
-function normalizeBlockKind(value: any, text: string): TypeCopyLayoutBlock['kind'] {
-  const raw = String(value || '').toLowerCase();
-  if (raw === 'header' || raw === 'paragraph' || raw === 'list' || raw === 'table' || raw === 'footer' || raw === 'signature' || raw === 'stamp' || raw === 'unreadable' || raw === 'other') {
-    return raw;
-  }
-
-  if (isNotReadableText(text)) return 'unreadable';
-  if (/^\s*(?:\(?\d+\)|\d+[.)])\s+/.test(text)) return 'list';
-  if (/signature|signed|verified/i.test(text)) return 'signature';
-  if (/seal|stamp/i.test(text)) return 'stamp';
-  return 'paragraph';
-}
-
-function inferTextBlockAlign(x: number, width: number, pageWidth: number): TypeCopyLayoutBlock['align'] {
-  const center = x + width / 2;
-  if (Math.abs(center - pageWidth / 2) <= pageWidth * 0.08 && width <= pageWidth * 0.75) return 'center';
-  if (x >= pageWidth * 0.56) return 'right';
-  return 'left';
-}
-
-function inferTextBlockKind(
-  text: string,
-  y: number,
-  pageHeight: number,
-  x: number,
-  width: number,
-  pageWidth: number,
-): TypeCopyLayoutBlock['kind'] {
-  if (isNotReadableText(text)) return 'unreadable';
-  if (y <= pageHeight * 0.16 && inferTextBlockAlign(x, width, pageWidth) === 'center') return 'header';
-  if (y >= pageHeight * 0.86) return 'footer';
-  if (/^\s*(?:\(?\d+\)|\d+[.)])\s+/.test(text)) return 'list';
-  if (/signature|signed|verified/i.test(text)) return 'signature';
-  if (/seal|stamp/i.test(text)) return 'stamp';
-  return 'paragraph';
-}
-
-function layoutHtmlFromPageLayout(layout: TypeCopyPageLayout) {
-  if (!layout.blocks.length) return '';
-
-  const ratio = `${roundLayoutNumber(layout.pageWidth)} / ${roundLayoutNumber(layout.pageHeight)}`;
-  const blocks = layout.blocks.map((block) => {
-    const left = percent(block.x, layout.pageWidth);
-    const top = percent(block.y, layout.pageHeight);
-    const width = percent(block.width, layout.pageWidth);
-    const minHeight = percent(block.height, layout.pageHeight);
-    const blockStyle = [
-      'position:absolute',
-      `left:${left}%`,
-      `top:${top}%`,
-      `width:${width}%`,
-      `min-height:${minHeight}%`,
-      `text-align:${block.align}`,
-      'white-space:pre-wrap',
-      'line-height:1.32',
-      'overflow:visible',
-      block.kind === 'header' ? 'font-weight:700' : '',
-      block.kind === 'table' ? 'border:1px solid #4b4236;padding:0.35rem' : '',
-      block.kind === 'unreadable' ? 'color:#92400e' : '',
-    ].filter(Boolean).join(';');
-
-    return `<div style="${blockStyle}">${renderBlockContent(block)}</div>`;
-  }).join('');
-
-  return `<div class="type-copy-page" style="position:relative;width:100%;aspect-ratio:${ratio};font-family:'Nirmala UI','Noto Serif Gujarati',Georgia,'Times New Roman',serif;font-size:13px;color:#211b14;background:#fff;">${blocks}</div>`;
-}
-
-function renderBlockText(text: string) {
-  return escapeHtml(text)
-    .replace(/\(Unreadable\)/g, '<span style="background:#fef3c7;color:#92400e;padding:0 0.18rem;border-radius:0.2rem;">(Unreadable)</span>');
-}
-
-function renderBlockContent(block: TypeCopyLayoutBlock) {
-  if (block.kind === 'table') return tableTextToHtml(block.text);
-  return renderBlockText(block.text);
-}
-
-function tableTextToHtml(text: string) {
-  const rows = text
-    .split(/\n+/)
-    .map(splitTableCells)
-    .filter((cells) => cells.length);
-
-  if (!rows.length || !rows.some((cells) => cells.length > 1)) {
-    return renderBlockText(text);
-  }
-
-  const cellCount = Math.max(...rows.map((cells) => cells.length));
-  const htmlRows = rows.map((cells) => {
-    const htmlCells = Array.from({ length: cellCount }, (_, index) => {
-      const cell = cells[index] || '';
-      return `<td style="border:1px solid #4b4236;padding:0.28rem 0.4rem;vertical-align:top;">${renderBlockText(cell)}</td>`;
-    }).join('');
-
-    return `<tr>${htmlCells}</tr>`;
-  }).join('');
-
-  return `<table style="width:100%;border-collapse:collapse;font-size:inherit;line-height:1.25;">${htmlRows}</table>`;
-}
-
-function splitTableCells(row: string) {
-  const cells = row.split(/\t+|\s*\|\s*|\s{2,}/).map((cell) => cell.trim());
-
-  while (cells.length && !cells[0]) cells.shift();
-  while (cells.length && !cells[cells.length - 1]) cells.pop();
-
-  return cells.some(Boolean) ? cells : [];
-}
-
-function sanitizeBlockId(value: string, index: number) {
-  const cleaned = value.replace(/[^a-z0-9_-]/gi, '').slice(0, 40);
-  return cleaned || `block-${index + 1}`;
-}
-
-function positiveFiniteNumber(value: number, fallback: number) {
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function percent(value: number, total: number) {
-  return roundLayoutNumber((value / Math.max(total, 1)) * 100);
-}
-
-function roundLayoutNumber(value: number) {
-  return Math.round(value * 100) / 100;
 }
 
 function looksLikeStructuredOcrJson(raw: string) {
@@ -1292,17 +945,14 @@ function looksLikeStructuredOcrJson(raw: string) {
 }
 
 function isNotReadableText(text: string) {
-  return /^\(?(?:not\s+readable|unreadable)\)?$/i.test(normalizeExtractedText(text));
+  return /^\(?not\s+readable\)?$/i.test(normalizeExtractedText(text));
 }
 
 function isUsableOcrText(text: string) {
   const normalized = normalizeExtractedText(text);
   if (!normalized || isNotReadableText(normalized)) return false;
 
-  const readableText = normalized.replace(/\(Unreadable\)/gi, '').trim();
-  if (!readableText) return false;
-
-  const signalChars = readableText.match(/[\p{L}\p{N}]/gu) || [];
+  const signalChars = normalized.match(/[\p{L}\p{N}]/gu) || [];
   if (signalChars.length < minimumMeaningfulOcrChars) return false;
 
   const uniqueSignalChars = new Set(signalChars.map((char) => char.toLocaleLowerCase()));
@@ -1314,17 +964,14 @@ function parseOcrLayout(raw: string): OcrLayout {
 
   try {
     const parsed = JSON.parse(stripped);
-    const pageLayout = normalizePageLayout(parsed.layout);
-    const layoutText = textFromLayoutBlocks(pageLayout.blocks);
-    const text = normalizeExtractedText(parsed.plainText || parsed.text || layoutText);
+    const text = normalizeExtractedText(parsed.plainText || parsed.text || '');
     if (!isUsableOcrText(text)) return { text: '', layoutHtml: '' };
 
     const layoutHtml = sanitizeLayoutHtml(parsed.layoutHtml || '');
 
     return {
       text,
-      layoutHtml: pageLayout.blocks.length ? layoutHtmlFromPageLayout(pageLayout) : layoutHtml || textToLayoutHtml(text),
-      pageLayout: pageLayout.blocks.length ? pageLayout : undefined,
+      layoutHtml: layoutHtml || textToLayoutHtml(text),
     };
   } catch {
     if (looksLikeStructuredOcrJson(raw)) return { text: '', layoutHtml: '' };
@@ -1350,16 +997,13 @@ function parseOcrLayoutPages(raw: string, fallbackPageNumbers: number[]) {
       const pageNumber = Number(page.pageNumber);
       if (!fallbackPageNumbers.includes(pageNumber)) continue;
 
-      const pageLayout = normalizePageLayout(page.layout);
-      const layoutText = textFromLayoutBlocks(pageLayout.blocks);
-      const text = normalizeExtractedText(page.plainText || page.text || layoutText);
+      const text = normalizeExtractedText(page.plainText || page.text || '');
       if (!isUsableOcrText(text)) continue;
 
       const layoutHtml = sanitizeLayoutHtml(page.layoutHtml || '');
       pages.set(pageNumber, {
         text,
-        layoutHtml: pageLayout.blocks.length ? layoutHtmlFromPageLayout(pageLayout) : layoutHtml || textToLayoutHtml(text),
-        pageLayout: pageLayout.blocks.length ? pageLayout : undefined,
+        layoutHtml: layoutHtml || textToLayoutHtml(text),
       });
     }
   } catch {
@@ -1379,9 +1023,8 @@ function typeCopySinglePageLayoutSchema() {
     properties: {
       plainText: { type: 'string' },
       layoutHtml: { type: 'string' },
-      layout: typeCopyPageLayoutSchema(),
     },
-    required: ['plainText', 'layoutHtml', 'layout'],
+    required: ['plainText', 'layoutHtml'],
   };
 }
 
@@ -1399,43 +1042,12 @@ function typeCopyLayoutSchema() {
             pageNumber: { type: 'number' },
             plainText: { type: 'string' },
             layoutHtml: { type: 'string' },
-            layout: typeCopyPageLayoutSchema(),
           },
-          required: ['pageNumber', 'plainText', 'layoutHtml', 'layout'],
+          required: ['pageNumber', 'plainText', 'layoutHtml'],
         },
       },
     },
     required: ['pages'],
-  };
-}
-
-function typeCopyPageLayoutSchema() {
-  return {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      pageWidth: { type: 'number' },
-      pageHeight: { type: 'number' },
-      blocks: {
-        type: 'array',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            id: { type: 'string' },
-            text: { type: 'string' },
-            x: { type: 'number' },
-            y: { type: 'number' },
-            width: { type: 'number' },
-            height: { type: 'number' },
-            align: { type: 'string', enum: ['left', 'center', 'right'] },
-            kind: { type: 'string', enum: ['header', 'paragraph', 'list', 'table', 'footer', 'signature', 'stamp', 'unreadable', 'other'] },
-          },
-          required: ['id', 'text', 'x', 'y', 'width', 'height', 'align', 'kind'],
-        },
-      },
-    },
-    required: ['pageWidth', 'pageHeight', 'blocks'],
   };
 }
 

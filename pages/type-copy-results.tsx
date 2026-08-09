@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Loader } from '@/components/ui/Loader';
 import { buildTypeCopyDocx, buildTypeCopyPdf } from '@/lib/typeCopyExport';
-import { buildTypeCopyDraftText, formatBytes, type TypeCopyPageLayout, type TypeCopyResult } from '@/lib/typeCopyDemo';
+import { buildTypeCopyDraftText, formatBytes, type TypeCopyResult } from '@/lib/typeCopyDemo';
 import { loadTypeCopyJob, loadTypeCopyResult, saveTypeCopyResult, type TypeCopyJob } from '@/lib/typeCopyStorage';
 import { runTypeCopyJob } from '@/lib/typeCopyJobRunner';
 
@@ -30,10 +30,10 @@ export default function TypeCopyResultsPage() {
   const progressPercent = pageCount ? Math.min(100, Math.round((completedPageCount / pageCount) * 100)) : 0;
   const unreadableCount = useMemo(() => {
     if (result?.pages?.length) {
-      return result.pages.reduce((count, page) => count + unreadableMarkerCount(page.text) + (page.status === 'not_readable' ? 1 : 0), 0);
+      return result.pages.filter((page) => page.status === 'not_readable').length;
     }
 
-    return unreadableMarkerCount(draft);
+    return (draft.match(/\(Not Readable\b/g) || []).length;
   }, [draft, result]);
   const extractedCount = result?.pages?.filter((page) => page.status === 'extracted').length || 0;
   const ocrCount = result?.pages?.filter((page) => page.status === 'ocr').length || 0;
@@ -202,13 +202,6 @@ export default function TypeCopyResultsPage() {
         .type-copy-layout div {
           margin: 0 0 0.75rem;
         }
-        .type-copy-layout .type-copy-page,
-        .type-copy-layout .type-copy-page div {
-          margin: 0;
-        }
-        .type-copy-layout .type-copy-page {
-          min-width: 100%;
-        }
         .type-copy-layout table {
           width: 100%;
           border-collapse: collapse;
@@ -286,9 +279,9 @@ export default function TypeCopyResultsPage() {
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-700">
                     <div className="flex items-center gap-2 font-semibold">
                       <AlertTriangle size={16} />
-                      (Unreadable)
+                      (Not Readable)
                     </div>
-                    <p className="mt-1 text-sm">{unreadableCount} marker{unreadableCount === 1 ? '' : 's'}</p>
+                    <p className="mt-1 text-sm">{unreadableCount} pages</p>
                   </div>
                   <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-blue-700">
                     <div className="flex items-center gap-2 font-semibold">
@@ -401,9 +394,7 @@ export default function TypeCopyResultsPage() {
                             <div
                               className="type-copy-layout text-sm leading-6"
                               dangerouslySetInnerHTML={{
-                                __html: page.pageLayout
-                                  ? pageLayoutToPreviewHtml(page.pageLayout)
-                                  : page.layoutHtml || textToPreviewHtml(page.text || draft),
+                                __html: page.layoutHtml || textToPreviewHtml(page.text || draft),
                               }}
                             />
                           </article>
@@ -457,121 +448,6 @@ export default function TypeCopyResultsPage() {
   );
 }
 
-const canonicalPreviewPageWidth = 1000;
-const canonicalPreviewPageHeight = 1414;
-
-function pageLayoutToPreviewHtml(layout: TypeCopyPageLayout) {
-  const normalized = normalizePreviewPageLayout(layout);
-  if (!normalized.blocks.length) return '';
-
-  const ratio = `${roundPreviewNumber(normalized.pageWidth)} / ${roundPreviewNumber(normalized.pageHeight)}`;
-  const blocks = normalized.blocks.map((block) => {
-    const style = [
-      'position:absolute',
-      `left:${previewPercent(block.x, normalized.pageWidth)}%`,
-      `top:${previewPercent(block.y, normalized.pageHeight)}%`,
-      `width:${previewPercent(block.width, normalized.pageWidth)}%`,
-      `min-height:${previewPercent(block.height, normalized.pageHeight)}%`,
-      `text-align:${block.align}`,
-      'white-space:pre-wrap',
-      'line-height:1.32',
-      'overflow:visible',
-      block.kind === 'header' ? 'font-weight:700' : '',
-      block.kind === 'table' ? 'border:1px solid #4b4236;padding:0.35rem' : '',
-      block.kind === 'unreadable' ? 'color:#92400e' : '',
-    ].filter(Boolean).join(';');
-
-    return `<div style="${style}">${renderPreviewBlockContent(block)}</div>`;
-  }).join('');
-
-  return `<div class="type-copy-page" style="position:relative;width:100%;aspect-ratio:${ratio};font-family:'Nirmala UI','Noto Serif Gujarati',Georgia,'Times New Roman',serif;font-size:13px;color:#211b14;background:#fff;">${blocks}</div>`;
-}
-
-function normalizePreviewPageLayout(layout: TypeCopyPageLayout): TypeCopyPageLayout {
-  const metrics = previewLayoutMetrics(layout);
-  const useCanonicalScale = layout.pageWidth > canonicalPreviewPageWidth * 1.45
-    && layout.pageHeight > canonicalPreviewPageHeight * 1.45
-    && metrics.maxRight > 0
-    && metrics.maxBottom > 0
-    && metrics.maxRight <= canonicalPreviewPageWidth * 1.15
-    && metrics.maxBottom <= canonicalPreviewPageHeight * 1.15;
-
-  if (!useCanonicalScale) return layout;
-
-  return {
-    ...layout,
-    pageWidth: canonicalPreviewPageWidth,
-    pageHeight: canonicalPreviewPageHeight,
-    blocks: layout.blocks.map((block) => ({
-      ...block,
-      x: clampPreviewNumber(block.x, 0, canonicalPreviewPageWidth),
-      y: clampPreviewNumber(block.y, 0, canonicalPreviewPageHeight),
-      width: clampPreviewNumber(block.width, 1, Math.max(1, canonicalPreviewPageWidth - Math.min(block.x, canonicalPreviewPageWidth))),
-      height: clampPreviewNumber(block.height, 1, Math.max(1, canonicalPreviewPageHeight - Math.min(block.y, canonicalPreviewPageHeight))),
-    })),
-  };
-}
-
-function previewLayoutMetrics(layout: TypeCopyPageLayout) {
-  return layout.blocks.reduce((metrics, block) => ({
-    maxRight: Math.max(metrics.maxRight, block.x + block.width),
-    maxBottom: Math.max(metrics.maxBottom, block.y + block.height),
-  }), { maxRight: 0, maxBottom: 0 });
-}
-
-function renderPreviewBlockText(text: string) {
-  return escapeHtml(text)
-    .replace(/\(Unreadable\)/g, '<span style="background:#fef3c7;color:#92400e;padding:0 0.18rem;border-radius:0.2rem;">(Unreadable)</span>');
-}
-
-function renderPreviewBlockContent(block: TypeCopyPageLayout['blocks'][number]) {
-  if (block.kind === 'table') return tableTextToPreviewHtml(block.text);
-  return renderPreviewBlockText(block.text);
-}
-
-function tableTextToPreviewHtml(text: string) {
-  const rows = text
-    .split(/\n+/)
-    .map(splitPreviewTableCells)
-    .filter((cells) => cells.length);
-
-  if (!rows.length || !rows.some((cells) => cells.length > 1)) {
-    return renderPreviewBlockText(text);
-  }
-
-  const cellCount = Math.max(...rows.map((cells) => cells.length));
-  const htmlRows = rows.map((cells) => {
-    const htmlCells = Array.from({ length: cellCount }, (_, index) => (
-      `<td style="border:1px solid #4b4236;padding:0.28rem 0.4rem;vertical-align:top;">${renderPreviewBlockText(cells[index] || '')}</td>`
-    )).join('');
-
-    return `<tr>${htmlCells}</tr>`;
-  }).join('');
-
-  return `<table style="width:100%;border-collapse:collapse;font-size:inherit;line-height:1.25;">${htmlRows}</table>`;
-}
-
-function splitPreviewTableCells(row: string) {
-  const cells = row.split(/\t+|\s*\|\s*|\s{2,}/).map((cell) => cell.trim());
-
-  while (cells.length && !cells[0]) cells.shift();
-  while (cells.length && !cells[cells.length - 1]) cells.pop();
-
-  return cells.some(Boolean) ? cells : [];
-}
-
-function previewPercent(value: number, total: number) {
-  return roundPreviewNumber((value / Math.max(total, 1)) * 100);
-}
-
-function clampPreviewNumber(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
-}
-
-function roundPreviewNumber(value: number) {
-  return Math.round(value * 100) / 100;
-}
-
 function textToPreviewHtml(text: string) {
   return `<pre>${escapeHtml(text)}</pre>`;
 }
@@ -602,19 +478,12 @@ function buildPreviewResultFromDraft(result: TypeCopyResult, draft: string): Typ
     const originalText = normalizePreviewText(page.text);
     const nextText = normalizePreviewText(editedText);
 
-    if (originalText === nextText) {
-      return {
-        ...page,
-        text: editedText,
-        layoutHtml: page.layoutHtml || textToPreviewHtml(editedText),
-      };
-    }
-
     return {
       ...page,
       text: editedText,
-      layoutHtml: textToPreviewHtml(editedText),
-      pageLayout: undefined,
+      layoutHtml: originalText === nextText
+        ? page.layoutHtml || textToPreviewHtml(editedText)
+        : textToPreviewHtml(editedText),
     };
   });
 
@@ -652,10 +521,6 @@ function parseDraftPages(draft: string) {
 
 function normalizePreviewText(text: string) {
   return text.replace(/\r\n?/g, '\n').trim();
-}
-
-function unreadableMarkerCount(text: string) {
-  return (text.match(/\((?:Unreadable|Not Readable)\)/gi) || []).length;
 }
 
 function escapeHtml(value: string) {

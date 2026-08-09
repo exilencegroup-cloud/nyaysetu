@@ -1,38 +1,7 @@
-export type TypeCopyBlockAlign = 'left' | 'center' | 'right';
-
-export type TypeCopyBlockKind =
-  | 'header'
-  | 'paragraph'
-  | 'list'
-  | 'table'
-  | 'footer'
-  | 'signature'
-  | 'stamp'
-  | 'unreadable'
-  | 'other';
-
-export interface TypeCopyLayoutBlock {
-  id: string;
-  text: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  align: TypeCopyBlockAlign;
-  kind: TypeCopyBlockKind;
-}
-
-export interface TypeCopyPageLayout {
-  pageWidth: number;
-  pageHeight: number;
-  blocks: TypeCopyLayoutBlock[];
-}
-
 export interface TypeCopyPage {
   pageNumber: number;
   text: string;
   layoutHtml?: string;
-  pageLayout?: TypeCopyPageLayout;
   status: 'extracted' | 'ocr' | 'not_readable';
 }
 
@@ -77,13 +46,13 @@ Raman Property Holdings                          Respondent
 
 TYPE COPY
 
-1. The Applicant submits that the original agreement was executed on (Unreadable) and possession was delivered thereafter.
+1. The Applicant submits that the original agreement was executed on (Not Readable) and possession was delivered thereafter.
 
 2. The Respondent acknowledged receipt of the consideration amount in the presence of witnesses whose names appear at paragraph 4 below.
 
 3. The certified scanned copy contains a faint court seal near the lower right margin. (Court Seal)
 
-4. Witness Name: (Unreadable)
+4. Witness Name: (Not Readable)
    Address: 21, Park Road, New Delhi
 
 5. The document bears one handwritten signature at the end of page 1. (Signature)
@@ -114,7 +83,7 @@ export function buildTypeCopyDraftText(
   const pageBlocks = pages.map((page) => {
     const body = page.status === 'extracted' || page.status === 'ocr'
       ? page.text
-      : '(Unreadable - OCR could not confidently read this page.)';
+      : '(Not Readable - OCR could not confidently read this page.)';
 
     return `--- Page ${page.pageNumber} of ${pageCount} ---\n${body}`;
   });
