@@ -23,7 +23,7 @@ const maxUploadSizeMb = 500;
 const maxUploadSizeBytes = maxUploadSizeMb * 1024 * 1024;
 const maxPdfPagesPerDocument = 1000;
 const maxScannedPagesPerBatch = 10;
-const preferredScannedPagesPerBatch = 3;
+const preferredScannedPagesPerBatch = 1;
 
 export function TypeCopyWorkspace() {
   const router = useRouter();
