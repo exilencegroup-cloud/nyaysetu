@@ -676,6 +676,8 @@ async function transcribePdfPageRange(fileId: string, fileName: string, pageNumb
     instructions: [
       'You convert scanned legal PDF pages into Type Copy with a formatted layout preview.',
       'Transcribe only visible text. Do not summarize, translate, explain, or add commentary.',
+      'Preserve the original language and script exactly: Hindi/Marathi/Sanskrit in Devanagari, Gujarati in Gujarati script, English in Latin script, Urdu in Urdu script, and mixed-language lines in the same mixed scripts as the source.',
+      'Do not transliterate, romanize, normalize into English, or change one Indian script into another. Copy names, places, numbers, punctuation, and legal terms word-for-word from the source.',
       'Return JSON only.',
       'For plainText, preserve paragraph order, indentation, numbering, and practical line breaks.',
       'For layoutHtml, recreate the visual page layout using only these tags: div, p, span, br, strong, em, u, pre, table, thead, tbody, tr, th, td.',
@@ -773,7 +775,9 @@ async function ocrImageBuffer(imageBuffer: Buffer, pageNumber: number, mimeType:
         role: 'system',
         content: [
           'You convert scanned legal document pages into Type Copy with a formatted layout preview.',
-          'Transcribe only visible text. Do not summarize or add commentary.',
+          'Transcribe only visible text. Do not summarize, translate, or add commentary.',
+          'Preserve the original language and script exactly: Hindi/Marathi/Sanskrit in Devanagari, Gujarati in Gujarati script, English in Latin script, Urdu in Urdu script, and mixed-language lines in the same mixed scripts as the source.',
+          'Do not transliterate, romanize, normalize into English, or change one Indian script into another. Copy names, places, numbers, punctuation, and legal terms word-for-word from the source.',
           'Return JSON only.',
           'For plainText, preserve paragraph order, indentation, numbering, and practical line breaks.',
           'For layoutHtml, recreate the visual page layout using only these tags: div, p, span, br, strong, em, u, pre, table, thead, tbody, tr, th, td.',
