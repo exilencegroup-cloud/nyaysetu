@@ -33,6 +33,7 @@ export interface TypeCopyPage {
   text: string;
   layoutHtml?: string;
   pageLayout?: TypeCopyPageLayout;
+  sourceImageDataUrl?: string;
   status: 'extracted' | 'ocr' | 'not_readable';
 }
 

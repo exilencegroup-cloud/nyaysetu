@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Loader } from '@/components/ui/Loader';
 import { buildTypeCopyDocx, buildTypeCopyPdf } from '@/lib/typeCopyExport';
-import { buildTypeCopyDraftText, formatBytes, type TypeCopyPageLayout, type TypeCopyResult } from '@/lib/typeCopyDemo';
+import { buildTypeCopyDraftText, formatBytes, type TypeCopyPage, type TypeCopyPageLayout, type TypeCopyResult } from '@/lib/typeCopyDemo';
 import { loadTypeCopyJob, loadTypeCopyResult, saveTypeCopyResult, type TypeCopyJob } from '@/lib/typeCopyStorage';
 import { runTypeCopyJob } from '@/lib/typeCopyJobRunner';
 
@@ -209,6 +209,16 @@ export default function TypeCopyResultsPage() {
         .type-copy-layout .type-copy-page {
           min-width: 100%;
         }
+        .type-copy-layout .type-copy-source-page,
+        .type-copy-layout .type-copy-source-page div {
+          margin: 0;
+        }
+        .type-copy-layout .type-copy-source-page img {
+          display: block;
+          width: 100%;
+          height: auto;
+          margin: 0;
+        }
         .type-copy-layout table {
           width: 100%;
           border-collapse: collapse;
@@ -401,7 +411,9 @@ export default function TypeCopyResultsPage() {
                             <div
                               className="type-copy-layout text-sm leading-6"
                               dangerouslySetInnerHTML={{
-                                __html: page.pageLayout
+                                __html: page.sourceImageDataUrl
+                                  ? sourceBackedPagePreviewHtml(page)
+                                  : page.pageLayout
                                   ? pageLayoutToPreviewHtml(page.pageLayout)
                                   : page.layoutHtml || textToPreviewHtml(page.text || draft),
                               }}
@@ -460,6 +472,13 @@ export default function TypeCopyResultsPage() {
 const canonicalPreviewPageWidth = 1000;
 const canonicalPreviewPageHeight = 1414;
 
+function sourceBackedPagePreviewHtml(page: TypeCopyPage) {
+  const alt = escapeAttribute(`Type Copy source preview for page ${page.pageNumber}`);
+  const source = escapeAttribute(page.sourceImageDataUrl || '');
+
+  return `<div class="type-copy-source-page" style="position:relative;width:100%;overflow:hidden;background:#fff;"><img alt="${alt}" src="${source}" /></div>`;
+}
+
 function pageLayoutToPreviewHtml(layout: TypeCopyPageLayout) {
   const normalized = normalizePreviewPageLayout(layout);
   if (!normalized.blocks.length) return '';
@@ -481,7 +500,7 @@ function pageLayoutToPreviewHtml(layout: TypeCopyPageLayout) {
       block.kind === 'unreadable' ? 'color:#92400e' : '',
     ].filter(Boolean).join(';');
 
-    return `<div style="${style}">${renderPreviewBlockText(block.text)}</div>`;
+    return `<div style="${style}">${renderPreviewBlockContent(block)}</div>`;
   }).join('');
 
   return `<div class="type-copy-page" style="position:relative;width:100%;aspect-ratio:${ratio};font-family:'Nirmala UI','Noto Serif Gujarati',Georgia,'Times New Roman',serif;font-size:13px;color:#211b14;background:#fff;">${blocks}</div>`;
@@ -522,6 +541,42 @@ function previewLayoutMetrics(layout: TypeCopyPageLayout) {
 function renderPreviewBlockText(text: string) {
   return escapeHtml(text)
     .replace(/\(Unreadable\)/g, '<span style="background:#fef3c7;color:#92400e;padding:0 0.18rem;border-radius:0.2rem;">(Unreadable)</span>');
+}
+
+function renderPreviewBlockContent(block: TypeCopyPageLayout['blocks'][number]) {
+  if (block.kind === 'table') return tableTextToPreviewHtml(block.text);
+  return renderPreviewBlockText(block.text);
+}
+
+function tableTextToPreviewHtml(text: string) {
+  const rows = text
+    .split(/\n+/)
+    .map(splitPreviewTableCells)
+    .filter((cells) => cells.length);
+
+  if (!rows.length || !rows.some((cells) => cells.length > 1)) {
+    return renderPreviewBlockText(text);
+  }
+
+  const cellCount = Math.max(...rows.map((cells) => cells.length));
+  const htmlRows = rows.map((cells) => {
+    const htmlCells = Array.from({ length: cellCount }, (_, index) => (
+      `<td style="border:1px solid #4b4236;padding:0.28rem 0.4rem;vertical-align:top;">${renderPreviewBlockText(cells[index] || '')}</td>`
+    )).join('');
+
+    return `<tr>${htmlCells}</tr>`;
+  }).join('');
+
+  return `<table style="width:100%;border-collapse:collapse;font-size:inherit;line-height:1.25;">${htmlRows}</table>`;
+}
+
+function splitPreviewTableCells(row: string) {
+  const cells = row.split(/\t+|\s*\|\s*|\s{2,}/).map((cell) => cell.trim());
+
+  while (cells.length && !cells[0]) cells.shift();
+  while (cells.length && !cells[cells.length - 1]) cells.pop();
+
+  return cells.some(Boolean) ? cells : [];
 }
 
 function previewPercent(value: number, total: number) {
@@ -579,6 +634,7 @@ function buildPreviewResultFromDraft(result: TypeCopyResult, draft: string): Typ
       text: editedText,
       layoutHtml: textToPreviewHtml(editedText),
       pageLayout: undefined,
+      sourceImageDataUrl: undefined,
     };
   });
 
@@ -624,4 +680,8 @@ function unreadableMarkerCount(text: string) {
 
 function escapeHtml(value: string) {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function escapeAttribute(value: string) {
+  return escapeHtml(value).replace(/"/g, '&quot;');
 }

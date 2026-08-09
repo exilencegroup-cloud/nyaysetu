@@ -34,6 +34,7 @@ const maxOcrImageBytes = 18 * 1024 * 1024;
 const maxPdfPagesPerDocument = positiveNumber(process.env.TYPE_COPY_MAX_DOCUMENT_PAGES, 1000);
 const maxSynchronousScannedPages = positiveNumber(process.env.TYPE_COPY_MAX_SYNC_OCR_PAGES, 10);
 const maxSynchronousPdfPages = positiveNumber(process.env.TYPE_COPY_MAX_SYNC_PDF_PAGES, 120);
+const maxPreviewSourceImageBytes = positiveNumber(process.env.TYPE_COPY_MAX_PREVIEW_IMAGE_BYTES, 2 * 1024 * 1024);
 const ocrRateLimitRetryAfterSeconds = positiveNumber(process.env.TYPE_COPY_OCR_RATE_LIMIT_RETRY_SECONDS, 25);
 const rateLimitedOcrChunkSize = positiveNumber(process.env.TYPE_COPY_RATE_LIMIT_OCR_CHUNK_PAGES, 3);
 const minimumMeaningfulOcrChars = 4;
@@ -63,6 +64,7 @@ interface OcrLayout {
   text: string;
   layoutHtml: string;
   pageLayout?: TypeCopyPageLayout;
+  sourceImageDataUrl?: string;
 }
 
 interface PageGeometry {
@@ -216,6 +218,7 @@ async function extractPdfPages(
       text,
       layoutHtml: text ? layout?.layoutHtml || textToLayoutHtml(text) : '',
       pageLayout: layout?.pageLayout,
+      sourceImageDataUrl: layout?.sourceImageDataUrl,
       status: text ? 'extracted' : 'not_readable',
     } satisfies TypeCopyPage;
   });
@@ -459,6 +462,7 @@ async function extractImagePage(filePath: string, extension: string): Promise<Ty
       text: layout.text,
       layoutHtml: layout.layoutHtml,
       pageLayout: layout.pageLayout,
+      sourceImageDataUrl: layout.sourceImageDataUrl,
       status: layout.text ? 'ocr' : 'not_readable',
     },
   ];
@@ -504,12 +508,7 @@ async function ocrUnreadablePdfPages(
         const imagePath = await renderPdfPageToPng(pdfPath, page.pageNumber, tempDir);
         const layout = await ocrImageFile(imagePath, page.pageNumber, 'image/png');
 
-        if (layout.text) {
-          page.text = layout.text;
-          page.layoutHtml = layout.layoutHtml;
-          page.pageLayout = layout.pageLayout;
-          page.status = 'ocr';
-        }
+        applyOcrLayoutToPage(page, layout);
       } catch (error) {
         if (isOpenAiQuotaError(error) || isOpenAiRateLimitError(error)) throw error;
         if (isPdfRenderUnavailable(error)) {
@@ -544,12 +543,7 @@ async function ocrUnreadablePdfPageImages(buffer: Buffer, pages: TypeCopyPage[])
         handledAnyPage = true;
         const layout = await ocrImageBuffer(image, page.pageNumber, 'image/png');
 
-        if (layout.text) {
-          page.text = layout.text;
-          page.layoutHtml = layout.layoutHtml;
-          page.pageLayout = layout.pageLayout;
-          page.status = 'ocr';
-        }
+        applyOcrLayoutToPage(page, layout);
       } catch (error) {
         if (isOpenAiQuotaError(error) || isOpenAiRateLimitError(error)) throw error;
         console.error(`Embedded image OCR failed for page ${page.pageNumber}:`, error);
@@ -674,14 +668,7 @@ async function ocrPdfViaFileInput(pdfPath: string, fileName: string, pages: Type
 
       for (const page of chunk) {
         const layout = parsedPages.get(page.pageNumber);
-        const text = normalizeExtractedText(layout?.text || '');
-
-        if (isUsableOcrText(text)) {
-          page.text = text;
-          page.layoutHtml = layout?.layoutHtml || textToLayoutHtml(text);
-          page.pageLayout = layout?.pageLayout;
-          page.status = 'ocr';
-        }
+        applyOcrLayoutToPage(page, layout);
       }
     }
   } finally {
@@ -697,6 +684,19 @@ function chunkPages(pages: TypeCopyPage[], size: number) {
     chunks.push(pages.slice(index, index + size));
   }
   return chunks;
+}
+
+function applyOcrLayoutToPage(page: TypeCopyPage, layout?: OcrLayout) {
+  if (!layout) return;
+  if (layout.sourceImageDataUrl) page.sourceImageDataUrl = layout.sourceImageDataUrl;
+
+  const text = normalizeExtractedText(layout.text || '');
+  if (!isUsableOcrText(text)) return;
+
+  page.text = text;
+  page.layoutHtml = layout.layoutHtml || textToLayoutHtml(text);
+  page.pageLayout = layout.pageLayout;
+  page.status = 'ocr';
 }
 
 async function transcribePdfPageRange(fileId: string, fileName: string, pageNumbers: number[], totalPages: number) {
@@ -805,6 +805,8 @@ async function ocrImageBuffer(
 
   const pageWidth = ocrLayoutPageWidth;
   const pageHeight = ocrLayoutPageHeight;
+  const encodedImage = imageBuffer.toString('base64');
+  const sourceImageDataUrl = previewImageDataUrl(imageBuffer, mimeType, encodedImage);
 
   const completion = await openai.chat.completions.create({
     model: typeCopyOcrModel,
@@ -851,7 +853,7 @@ async function ocrImageBuffer(
           {
             type: 'image_url',
             image_url: {
-              url: `data:${mimeType};base64,${imageBuffer.toString('base64')}`,
+              url: `data:${mimeType};base64,${encodedImage}`,
               detail: 'high',
             },
           },
@@ -875,10 +877,19 @@ async function ocrImageBuffer(
   const parsed = parseOcrLayout(content);
 
   if (!isUsableOcrText(parsed.text)) {
-    return { text: '', layoutHtml: '' };
+    return { text: '', layoutHtml: '', sourceImageDataUrl };
   }
 
-  return parsed;
+  return {
+    ...parsed,
+    sourceImageDataUrl,
+  };
+}
+
+function previewImageDataUrl(imageBuffer: Buffer, mimeType: string, encodedImage = imageBuffer.toString('base64')) {
+  if (imageBuffer.length <= 0 || imageBuffer.length > maxPreviewSourceImageBytes) return undefined;
+  const safeMimeType = /^image\/(?:png|jpe?g|webp)$/i.test(mimeType) ? mimeType : 'image/png';
+  return `data:${safeMimeType};base64,${encodedImage}`;
 }
 
 function encodePdfJsImageAsPng(image: { width: number; height: number; kind?: number; data: Uint8Array }) {
@@ -1219,7 +1230,7 @@ function layoutHtmlFromPageLayout(layout: TypeCopyPageLayout) {
       block.kind === 'unreadable' ? 'color:#92400e' : '',
     ].filter(Boolean).join(';');
 
-    return `<div style="${blockStyle}">${renderBlockText(block.text)}</div>`;
+    return `<div style="${blockStyle}">${renderBlockContent(block)}</div>`;
   }).join('');
 
   return `<div class="type-copy-page" style="position:relative;width:100%;aspect-ratio:${ratio};font-family:'Nirmala UI','Noto Serif Gujarati',Georgia,'Times New Roman',serif;font-size:13px;color:#211b14;background:#fff;">${blocks}</div>`;
@@ -1228,6 +1239,43 @@ function layoutHtmlFromPageLayout(layout: TypeCopyPageLayout) {
 function renderBlockText(text: string) {
   return escapeHtml(text)
     .replace(/\(Unreadable\)/g, '<span style="background:#fef3c7;color:#92400e;padding:0 0.18rem;border-radius:0.2rem;">(Unreadable)</span>');
+}
+
+function renderBlockContent(block: TypeCopyLayoutBlock) {
+  if (block.kind === 'table') return tableTextToHtml(block.text);
+  return renderBlockText(block.text);
+}
+
+function tableTextToHtml(text: string) {
+  const rows = text
+    .split(/\n+/)
+    .map(splitTableCells)
+    .filter((cells) => cells.length);
+
+  if (!rows.length || !rows.some((cells) => cells.length > 1)) {
+    return renderBlockText(text);
+  }
+
+  const cellCount = Math.max(...rows.map((cells) => cells.length));
+  const htmlRows = rows.map((cells) => {
+    const htmlCells = Array.from({ length: cellCount }, (_, index) => {
+      const cell = cells[index] || '';
+      return `<td style="border:1px solid #4b4236;padding:0.28rem 0.4rem;vertical-align:top;">${renderBlockText(cell)}</td>`;
+    }).join('');
+
+    return `<tr>${htmlCells}</tr>`;
+  }).join('');
+
+  return `<table style="width:100%;border-collapse:collapse;font-size:inherit;line-height:1.25;">${htmlRows}</table>`;
+}
+
+function splitTableCells(row: string) {
+  const cells = row.split(/\t+|\s*\|\s*|\s{2,}/).map((cell) => cell.trim());
+
+  while (cells.length && !cells[0]) cells.shift();
+  while (cells.length && !cells[cells.length - 1]) cells.pop();
+
+  return cells.some(Boolean) ? cells : [];
 }
 
 function sanitizeBlockId(value: string, index: number) {
