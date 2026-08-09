@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Loader } from '@/components/ui/Loader';
 import { buildTypeCopyDocx, buildTypeCopyPdf } from '@/lib/typeCopyExport';
-import { buildTypeCopyDraftText, formatBytes, type TypeCopyPage, type TypeCopyPageLayout, type TypeCopyResult } from '@/lib/typeCopyDemo';
+import { buildTypeCopyDraftText, formatBytes, type TypeCopyPageLayout, type TypeCopyResult } from '@/lib/typeCopyDemo';
 import { loadTypeCopyJob, loadTypeCopyResult, saveTypeCopyResult, type TypeCopyJob } from '@/lib/typeCopyStorage';
 import { runTypeCopyJob } from '@/lib/typeCopyJobRunner';
 
@@ -209,16 +209,6 @@ export default function TypeCopyResultsPage() {
         .type-copy-layout .type-copy-page {
           min-width: 100%;
         }
-        .type-copy-layout .type-copy-source-page,
-        .type-copy-layout .type-copy-source-page div {
-          margin: 0;
-        }
-        .type-copy-layout .type-copy-source-page img {
-          display: block;
-          width: 100%;
-          height: auto;
-          margin: 0;
-        }
         .type-copy-layout table {
           width: 100%;
           border-collapse: collapse;
@@ -411,9 +401,7 @@ export default function TypeCopyResultsPage() {
                             <div
                               className="type-copy-layout text-sm leading-6"
                               dangerouslySetInnerHTML={{
-                                __html: page.sourceImageDataUrl
-                                  ? sourceBackedPagePreviewHtml(page)
-                                  : page.pageLayout
+                                __html: page.pageLayout
                                   ? pageLayoutToPreviewHtml(page.pageLayout)
                                   : page.layoutHtml || textToPreviewHtml(page.text || draft),
                               }}
@@ -471,13 +459,6 @@ export default function TypeCopyResultsPage() {
 
 const canonicalPreviewPageWidth = 1000;
 const canonicalPreviewPageHeight = 1414;
-
-function sourceBackedPagePreviewHtml(page: TypeCopyPage) {
-  const alt = escapeAttribute(`Type Copy source preview for page ${page.pageNumber}`);
-  const source = escapeAttribute(page.sourceImageDataUrl || '');
-
-  return `<div class="type-copy-source-page" style="position:relative;width:100%;overflow:hidden;background:#fff;"><img alt="${alt}" src="${source}" /></div>`;
-}
 
 function pageLayoutToPreviewHtml(layout: TypeCopyPageLayout) {
   const normalized = normalizePreviewPageLayout(layout);
@@ -634,7 +615,6 @@ function buildPreviewResultFromDraft(result: TypeCopyResult, draft: string): Typ
       text: editedText,
       layoutHtml: textToPreviewHtml(editedText),
       pageLayout: undefined,
-      sourceImageDataUrl: undefined,
     };
   });
 
@@ -680,8 +660,4 @@ function unreadableMarkerCount(text: string) {
 
 function escapeHtml(value: string) {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function escapeAttribute(value: string) {
-  return escapeHtml(value).replace(/"/g, '&quot;');
 }

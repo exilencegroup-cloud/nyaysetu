@@ -34,7 +34,6 @@ const maxOcrImageBytes = 18 * 1024 * 1024;
 const maxPdfPagesPerDocument = positiveNumber(process.env.TYPE_COPY_MAX_DOCUMENT_PAGES, 1000);
 const maxSynchronousScannedPages = positiveNumber(process.env.TYPE_COPY_MAX_SYNC_OCR_PAGES, 10);
 const maxSynchronousPdfPages = positiveNumber(process.env.TYPE_COPY_MAX_SYNC_PDF_PAGES, 120);
-const maxPreviewSourceImageBytes = positiveNumber(process.env.TYPE_COPY_MAX_PREVIEW_IMAGE_BYTES, 2 * 1024 * 1024);
 const ocrRateLimitRetryAfterSeconds = positiveNumber(process.env.TYPE_COPY_OCR_RATE_LIMIT_RETRY_SECONDS, 25);
 const rateLimitedOcrChunkSize = positiveNumber(process.env.TYPE_COPY_RATE_LIMIT_OCR_CHUNK_PAGES, 3);
 const minimumMeaningfulOcrChars = 4;
@@ -64,7 +63,6 @@ interface OcrLayout {
   text: string;
   layoutHtml: string;
   pageLayout?: TypeCopyPageLayout;
-  sourceImageDataUrl?: string;
 }
 
 interface PageGeometry {
@@ -218,7 +216,6 @@ async function extractPdfPages(
       text,
       layoutHtml: text ? layout?.layoutHtml || textToLayoutHtml(text) : '',
       pageLayout: layout?.pageLayout,
-      sourceImageDataUrl: layout?.sourceImageDataUrl,
       status: text ? 'extracted' : 'not_readable',
     } satisfies TypeCopyPage;
   });
@@ -462,7 +459,6 @@ async function extractImagePage(filePath: string, extension: string): Promise<Ty
       text: layout.text,
       layoutHtml: layout.layoutHtml,
       pageLayout: layout.pageLayout,
-      sourceImageDataUrl: layout.sourceImageDataUrl,
       status: layout.text ? 'ocr' : 'not_readable',
     },
   ];
@@ -688,7 +684,6 @@ function chunkPages(pages: TypeCopyPage[], size: number) {
 
 function applyOcrLayoutToPage(page: TypeCopyPage, layout?: OcrLayout) {
   if (!layout) return;
-  if (layout.sourceImageDataUrl) page.sourceImageDataUrl = layout.sourceImageDataUrl;
 
   const text = normalizeExtractedText(layout.text || '');
   if (!isUsableOcrText(text)) return;
@@ -715,7 +710,8 @@ async function transcribePdfPageRange(fileId: string, fileName: string, pageNumb
       'Every heading, line, paragraph, list item, table region, footer, signature, stamp, and unreadable gap must be represented as a layout block at its approximate source position.',
       'Centered titles must be header blocks with align center. Right-side dates, page numbers, advocate names, signature blocks, and verification blocks must be align right.',
       'When the source has left and right content on the same visual row, return separate blocks with their own x positions instead of joining them into one left-aligned line.',
-      'Use kind table for table regions, preserving row order with line breaks and tabs in the block text.',
+      'Use kind table for every visible table or ruled grid. Preserve row order with line breaks and separate cells with tab characters in the block text.',
+      'Do not omit table cells because they are blank or hard to read; use (Unreadable) in unclear cells so the table shape remains visible.',
       'For plainText, preserve human reading order, indentation, numbering, and practical line breaks.',
       'Set layoutHtml to an empty string; the application reconstructs visual layout from layout blocks.',
       'Do not flatten everything into left-aligned paragraphs.',
@@ -806,7 +802,6 @@ async function ocrImageBuffer(
   const pageWidth = ocrLayoutPageWidth;
   const pageHeight = ocrLayoutPageHeight;
   const encodedImage = imageBuffer.toString('base64');
-  const sourceImageDataUrl = previewImageDataUrl(imageBuffer, mimeType, encodedImage);
 
   const completion = await openai.chat.completions.create({
     model: typeCopyOcrModel,
@@ -824,7 +819,8 @@ async function ocrImageBuffer(
           'Every heading, line, paragraph, list item, table region, footer, signature, stamp, and unreadable gap must be represented as a layout block at its approximate source position.',
           'Centered titles must be header blocks with align center. Right-side dates, page numbers, advocate names, signature blocks, and verification blocks must be align right.',
           'When the source has left and right content on the same visual row, return separate blocks with their own x positions instead of joining them into one left-aligned line.',
-          'Use kind table for table regions, preserving row order with line breaks and tabs in the block text.',
+          'Use kind table for every visible table or ruled grid. Preserve row order with line breaks and separate cells with tab characters in the block text.',
+          'Do not omit table cells because they are blank or hard to read; use (Unreadable) in unclear cells so the table shape remains visible.',
           'For plainText, preserve human reading order, indentation, numbering, and practical line breaks.',
           'Set layoutHtml to an empty string; the application reconstructs visual layout from layout blocks.',
           'Do not flatten everything into left-aligned paragraphs.',
@@ -877,19 +873,10 @@ async function ocrImageBuffer(
   const parsed = parseOcrLayout(content);
 
   if (!isUsableOcrText(parsed.text)) {
-    return { text: '', layoutHtml: '', sourceImageDataUrl };
+    return { text: '', layoutHtml: '' };
   }
 
-  return {
-    ...parsed,
-    sourceImageDataUrl,
-  };
-}
-
-function previewImageDataUrl(imageBuffer: Buffer, mimeType: string, encodedImage = imageBuffer.toString('base64')) {
-  if (imageBuffer.length <= 0 || imageBuffer.length > maxPreviewSourceImageBytes) return undefined;
-  const safeMimeType = /^image\/(?:png|jpe?g|webp)$/i.test(mimeType) ? mimeType : 'image/png';
-  return `data:${safeMimeType};base64,${encodedImage}`;
+  return parsed;
 }
 
 function encodePdfJsImageAsPng(image: { width: number; height: number; kind?: number; data: Uint8Array }) {
