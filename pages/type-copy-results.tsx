@@ -30,10 +30,10 @@ export default function TypeCopyResultsPage() {
   const progressPercent = pageCount ? Math.min(100, Math.round((completedPageCount / pageCount) * 100)) : 0;
   const unreadableCount = useMemo(() => {
     if (result?.pages?.length) {
-      return result.pages.filter((page) => page.status === 'not_readable').length;
+      return result.pages.reduce((count, page) => count + unreadableMarkerCount(page.text) + (page.status === 'not_readable' ? 1 : 0), 0);
     }
 
-    return (draft.match(/\(Not Readable\b/g) || []).length;
+    return unreadableMarkerCount(draft);
   }, [draft, result]);
   const extractedCount = result?.pages?.filter((page) => page.status === 'extracted').length || 0;
   const ocrCount = result?.pages?.filter((page) => page.status === 'ocr').length || 0;
@@ -202,6 +202,13 @@ export default function TypeCopyResultsPage() {
         .type-copy-layout div {
           margin: 0 0 0.75rem;
         }
+        .type-copy-layout .type-copy-page,
+        .type-copy-layout .type-copy-page div {
+          margin: 0;
+        }
+        .type-copy-layout .type-copy-page {
+          min-width: 100%;
+        }
         .type-copy-layout table {
           width: 100%;
           border-collapse: collapse;
@@ -279,9 +286,9 @@ export default function TypeCopyResultsPage() {
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-700">
                     <div className="flex items-center gap-2 font-semibold">
                       <AlertTriangle size={16} />
-                      (Not Readable)
+                      (Unreadable)
                     </div>
-                    <p className="mt-1 text-sm">{unreadableCount} pages</p>
+                    <p className="mt-1 text-sm">{unreadableCount} marker{unreadableCount === 1 ? '' : 's'}</p>
                   </div>
                   <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-blue-700">
                     <div className="flex items-center gap-2 font-semibold">
@@ -478,12 +485,19 @@ function buildPreviewResultFromDraft(result: TypeCopyResult, draft: string): Typ
     const originalText = normalizePreviewText(page.text);
     const nextText = normalizePreviewText(editedText);
 
+    if (originalText === nextText) {
+      return {
+        ...page,
+        text: editedText,
+        layoutHtml: page.layoutHtml || textToPreviewHtml(editedText),
+      };
+    }
+
     return {
       ...page,
       text: editedText,
-      layoutHtml: originalText === nextText
-        ? page.layoutHtml || textToPreviewHtml(editedText)
-        : textToPreviewHtml(editedText),
+      layoutHtml: textToPreviewHtml(editedText),
+      pageLayout: undefined,
     };
   });
 
@@ -521,6 +535,10 @@ function parseDraftPages(draft: string) {
 
 function normalizePreviewText(text: string) {
   return text.replace(/\r\n?/g, '\n').trim();
+}
+
+function unreadableMarkerCount(text: string) {
+  return (text.match(/\((?:Unreadable|Not Readable)\)/gi) || []).length;
 }
 
 function escapeHtml(value: string) {
