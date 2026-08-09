@@ -29,6 +29,7 @@ const maxUploadSizeBytes = maxUploadSizeMb * 1024 * 1024;
 const typeCopyOcrModel = process.env.TYPE_COPY_OCR_MODEL || 'gpt-4o-mini';
 const pdfRenderDpi = Number(process.env.TYPE_COPY_RENDER_DPI || 140);
 const maxOcrImageBytes = 18 * 1024 * 1024;
+const maxOcrOutputTokens = positiveNumber(process.env.TYPE_COPY_OCR_MAX_OUTPUT_TOKENS, 12000);
 const maxPdfPagesPerDocument = positiveNumber(process.env.TYPE_COPY_MAX_DOCUMENT_PAGES, 1000);
 const maxSynchronousScannedPages = positiveNumber(process.env.TYPE_COPY_MAX_SYNC_OCR_PAGES, 10);
 const maxSynchronousPdfPages = positiveNumber(process.env.TYPE_COPY_MAX_SYNC_PDF_PAGES, 120);
@@ -678,6 +679,8 @@ async function transcribePdfPageRange(fileId: string, fileName: string, pageNumb
       'Transcribe only visible text. Do not summarize, translate, explain, or add commentary.',
       'Preserve the original language and script exactly: Hindi/Marathi/Sanskrit in Devanagari, Gujarati in Gujarati script, English in Latin script, Urdu in Urdu script, and mixed-language lines in the same mixed scripts as the source.',
       'Do not transliterate, romanize, normalize into English, or change one Indian script into another. Copy names, places, numbers, punctuation, and legal terms word-for-word from the source.',
+      'Include every visible printed label, filled value, handwritten annotation, margin note, stamp text, seal text, page number, date, section number, list marker, punctuation mark, and underlined value.',
+      'Never compress, paraphrase, merge, or skip repeated form labels just because they look boilerplate.',
       'Return JSON only.',
       'For plainText, preserve paragraph order, indentation, numbering, and practical line breaks.',
       'For layoutHtml, recreate the visual page layout using only these tags: div, p, span, br, strong, em, u, pre, table, thead, tbody, tr, th, td.',
@@ -719,7 +722,7 @@ async function transcribePdfPageRange(fileId: string, fileName: string, pageNumb
         ],
       },
     ],
-    max_output_tokens: 12000,
+    max_output_tokens: maxOcrOutputTokens,
     store: false,
     text: {
       format: {
@@ -769,7 +772,7 @@ async function ocrImageBuffer(imageBuffer: Buffer, pageNumber: number, mimeType:
   const completion = await openai.chat.completions.create({
     model: typeCopyOcrModel,
     temperature: 0,
-    max_tokens: 3500,
+    max_tokens: maxOcrOutputTokens,
     messages: [
       {
         role: 'system',
@@ -778,6 +781,8 @@ async function ocrImageBuffer(imageBuffer: Buffer, pageNumber: number, mimeType:
           'Transcribe only visible text. Do not summarize, translate, or add commentary.',
           'Preserve the original language and script exactly: Hindi/Marathi/Sanskrit in Devanagari, Gujarati in Gujarati script, English in Latin script, Urdu in Urdu script, and mixed-language lines in the same mixed scripts as the source.',
           'Do not transliterate, romanize, normalize into English, or change one Indian script into another. Copy names, places, numbers, punctuation, and legal terms word-for-word from the source.',
+          'Include every visible printed label, filled value, handwritten annotation, margin note, stamp text, seal text, page number, date, section number, list marker, punctuation mark, and underlined value.',
+          'Never compress, paraphrase, merge, or skip repeated form labels just because they look boilerplate.',
           'Return JSON only.',
           'For plainText, preserve paragraph order, indentation, numbering, and practical line breaks.',
           'For layoutHtml, recreate the visual page layout using only these tags: div, p, span, br, strong, em, u, pre, table, thead, tbody, tr, th, td.',

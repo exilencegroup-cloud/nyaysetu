@@ -189,7 +189,7 @@ export default function TypeCopyResultsPage() {
       </Head>
       <style jsx global>{`
         .type-copy-layout {
-          font-family: Georgia, "Times New Roman", serif;
+          font-family: "Nirmala UI", Shruti, "Noto Sans Gujarati", "Noto Sans Devanagari", Georgia, "Times New Roman", serif;
         }
         .type-copy-layout pre {
           margin: 0;
@@ -201,6 +201,7 @@ export default function TypeCopyResultsPage() {
         .type-copy-layout p,
         .type-copy-layout div {
           margin: 0 0 0.75rem;
+          white-space: pre-wrap;
         }
         .type-copy-layout table {
           width: 100%;
