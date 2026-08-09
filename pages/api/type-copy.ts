@@ -37,6 +37,8 @@ const maxSynchronousPdfPages = positiveNumber(process.env.TYPE_COPY_MAX_SYNC_PDF
 const ocrRateLimitRetryAfterSeconds = positiveNumber(process.env.TYPE_COPY_OCR_RATE_LIMIT_RETRY_SECONDS, 25);
 const rateLimitedOcrChunkSize = positiveNumber(process.env.TYPE_COPY_RATE_LIMIT_OCR_CHUNK_PAGES, 3);
 const minimumMeaningfulOcrChars = 4;
+const ocrLayoutPageWidth = 1000;
+const ocrLayoutPageHeight = 1414;
 const textLayerSampleThreshold = 40;
 const allowedLayoutHtmlTags = new Set(['div', 'p', 'span', 'br', 'strong', 'em', 'u', 'pre', 'table', 'thead', 'tbody', 'tr', 'th', 'td']);
 const allowedLayoutStyleProps = new Set([
@@ -736,7 +738,7 @@ async function transcribePdfPageRange(fileId: string, fileName: string, pageNumb
               `Transcribe ${pageLabel} only.`,
               `Requested page numbers: ${pageNumbers.join(', ')}.`,
               'Return a JSON object with this exact shape:',
-              '{"pages":[{"pageNumber":1,"plainText":"...","layoutHtml":"","layout":{"pageWidth":1000,"pageHeight":1414,"blocks":[{"id":"b1","text":"...","x":72,"y":90,"width":400,"height":24,"align":"left","kind":"paragraph"}]}}]}',
+              `{"pages":[{"pageNumber":1,"plainText":"...","layoutHtml":"","layout":{"pageWidth":${ocrLayoutPageWidth},"pageHeight":${ocrLayoutPageHeight},"blocks":[{"id":"b1","text":"...","x":72,"y":90,"width":400,"height":24,"align":"left","kind":"paragraph"}]}}]}`,
               'Return the requested pages in order.',
               'If a requested page has no readable text, set plainText to "(Unreadable)" and include one unreadable layout block at the visual unreadable area.',
               'Never fill plainText or layoutHtml with repeated \\n characters or placeholder letters.',
@@ -801,8 +803,8 @@ async function ocrImageBuffer(
     throw new Error('Image is too large for OCR.');
   }
 
-  const pageWidth = Math.round(positiveFiniteNumber(geometry.pageWidth, 1000));
-  const pageHeight = Math.round(positiveFiniteNumber(geometry.pageHeight, 1414));
+  const pageWidth = ocrLayoutPageWidth;
+  const pageHeight = ocrLayoutPageHeight;
 
   const completion = await openai.chat.completions.create({
     model: typeCopyOcrModel,
@@ -1083,9 +1085,13 @@ function splitLineItemsIntoSegments(
 }
 
 function normalizePageLayout(raw: any): TypeCopyPageLayout {
-  const pageWidth = clamp(positiveFiniteNumber(Number(raw?.pageWidth), 1000), 100, 10000);
-  const pageHeight = clamp(positiveFiniteNumber(Number(raw?.pageHeight), 1414), 100, 20000);
   const rawBlocks = Array.isArray(raw?.blocks) ? raw.blocks : [];
+  const metrics = layoutBlockMetrics(rawBlocks);
+  const rawPageWidth = clamp(positiveFiniteNumber(Number(raw?.pageWidth), ocrLayoutPageWidth), 100, 10000);
+  const rawPageHeight = clamp(positiveFiniteNumber(Number(raw?.pageHeight), ocrLayoutPageHeight), 100, 20000);
+  const useCanonicalScale = shouldUseCanonicalLayoutScale(rawPageWidth, rawPageHeight, metrics);
+  const pageWidth = useCanonicalScale ? ocrLayoutPageWidth : rawPageWidth;
+  const pageHeight = useCanonicalScale ? ocrLayoutPageHeight : rawPageHeight;
   const blocks = rawBlocks
     .slice(0, 180)
     .map((block: any, index: number) => normalizeLayoutBlock(block, index, pageWidth, pageHeight))
@@ -1093,6 +1099,36 @@ function normalizePageLayout(raw: any): TypeCopyPageLayout {
     .sort((a: TypeCopyLayoutBlock, b: TypeCopyLayoutBlock) => Math.abs(a.y - b.y) < 6 ? a.x - b.x : a.y - b.y);
 
   return { pageWidth, pageHeight, blocks };
+}
+
+function layoutBlockMetrics(blocks: any[]) {
+  let maxRight = 0;
+  let maxBottom = 0;
+
+  for (const block of blocks) {
+    const x = Number(block?.x || 0);
+    const y = Number(block?.y || 0);
+    const width = Number(block?.width || 0);
+    const height = Number(block?.height || 0);
+
+    if (Number.isFinite(x) && Number.isFinite(width)) maxRight = Math.max(maxRight, x + width);
+    if (Number.isFinite(y) && Number.isFinite(height)) maxBottom = Math.max(maxBottom, y + height);
+  }
+
+  return { maxRight, maxBottom };
+}
+
+function shouldUseCanonicalLayoutScale(
+  pageWidth: number,
+  pageHeight: number,
+  metrics: { maxRight: number; maxBottom: number },
+) {
+  return pageWidth > ocrLayoutPageWidth * 1.45
+    && pageHeight > ocrLayoutPageHeight * 1.45
+    && metrics.maxRight > 0
+    && metrics.maxBottom > 0
+    && metrics.maxRight <= ocrLayoutPageWidth * 1.15
+    && metrics.maxBottom <= ocrLayoutPageHeight * 1.15;
 }
 
 function normalizeLayoutBlock(block: any, index: number, pageWidth: number, pageHeight: number): TypeCopyLayoutBlock | null {

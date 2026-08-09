@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Loader } from '@/components/ui/Loader';
 import { buildTypeCopyDocx, buildTypeCopyPdf } from '@/lib/typeCopyExport';
-import { buildTypeCopyDraftText, formatBytes, type TypeCopyResult } from '@/lib/typeCopyDemo';
+import { buildTypeCopyDraftText, formatBytes, type TypeCopyPageLayout, type TypeCopyResult } from '@/lib/typeCopyDemo';
 import { loadTypeCopyJob, loadTypeCopyResult, saveTypeCopyResult, type TypeCopyJob } from '@/lib/typeCopyStorage';
 import { runTypeCopyJob } from '@/lib/typeCopyJobRunner';
 
@@ -401,7 +401,9 @@ export default function TypeCopyResultsPage() {
                             <div
                               className="type-copy-layout text-sm leading-6"
                               dangerouslySetInnerHTML={{
-                                __html: page.layoutHtml || textToPreviewHtml(page.text || draft),
+                                __html: page.pageLayout
+                                  ? pageLayoutToPreviewHtml(page.pageLayout)
+                                  : page.layoutHtml || textToPreviewHtml(page.text || draft),
                               }}
                             />
                           </article>
@@ -453,6 +455,85 @@ export default function TypeCopyResultsPage() {
       </div>
     </>
   );
+}
+
+const canonicalPreviewPageWidth = 1000;
+const canonicalPreviewPageHeight = 1414;
+
+function pageLayoutToPreviewHtml(layout: TypeCopyPageLayout) {
+  const normalized = normalizePreviewPageLayout(layout);
+  if (!normalized.blocks.length) return '';
+
+  const ratio = `${roundPreviewNumber(normalized.pageWidth)} / ${roundPreviewNumber(normalized.pageHeight)}`;
+  const blocks = normalized.blocks.map((block) => {
+    const style = [
+      'position:absolute',
+      `left:${previewPercent(block.x, normalized.pageWidth)}%`,
+      `top:${previewPercent(block.y, normalized.pageHeight)}%`,
+      `width:${previewPercent(block.width, normalized.pageWidth)}%`,
+      `min-height:${previewPercent(block.height, normalized.pageHeight)}%`,
+      `text-align:${block.align}`,
+      'white-space:pre-wrap',
+      'line-height:1.32',
+      'overflow:visible',
+      block.kind === 'header' ? 'font-weight:700' : '',
+      block.kind === 'table' ? 'border:1px solid #4b4236;padding:0.35rem' : '',
+      block.kind === 'unreadable' ? 'color:#92400e' : '',
+    ].filter(Boolean).join(';');
+
+    return `<div style="${style}">${renderPreviewBlockText(block.text)}</div>`;
+  }).join('');
+
+  return `<div class="type-copy-page" style="position:relative;width:100%;aspect-ratio:${ratio};font-family:'Nirmala UI','Noto Serif Gujarati',Georgia,'Times New Roman',serif;font-size:13px;color:#211b14;background:#fff;">${blocks}</div>`;
+}
+
+function normalizePreviewPageLayout(layout: TypeCopyPageLayout): TypeCopyPageLayout {
+  const metrics = previewLayoutMetrics(layout);
+  const useCanonicalScale = layout.pageWidth > canonicalPreviewPageWidth * 1.45
+    && layout.pageHeight > canonicalPreviewPageHeight * 1.45
+    && metrics.maxRight > 0
+    && metrics.maxBottom > 0
+    && metrics.maxRight <= canonicalPreviewPageWidth * 1.15
+    && metrics.maxBottom <= canonicalPreviewPageHeight * 1.15;
+
+  if (!useCanonicalScale) return layout;
+
+  return {
+    ...layout,
+    pageWidth: canonicalPreviewPageWidth,
+    pageHeight: canonicalPreviewPageHeight,
+    blocks: layout.blocks.map((block) => ({
+      ...block,
+      x: clampPreviewNumber(block.x, 0, canonicalPreviewPageWidth),
+      y: clampPreviewNumber(block.y, 0, canonicalPreviewPageHeight),
+      width: clampPreviewNumber(block.width, 1, Math.max(1, canonicalPreviewPageWidth - Math.min(block.x, canonicalPreviewPageWidth))),
+      height: clampPreviewNumber(block.height, 1, Math.max(1, canonicalPreviewPageHeight - Math.min(block.y, canonicalPreviewPageHeight))),
+    })),
+  };
+}
+
+function previewLayoutMetrics(layout: TypeCopyPageLayout) {
+  return layout.blocks.reduce((metrics, block) => ({
+    maxRight: Math.max(metrics.maxRight, block.x + block.width),
+    maxBottom: Math.max(metrics.maxBottom, block.y + block.height),
+  }), { maxRight: 0, maxBottom: 0 });
+}
+
+function renderPreviewBlockText(text: string) {
+  return escapeHtml(text)
+    .replace(/\(Unreadable\)/g, '<span style="background:#fef3c7;color:#92400e;padding:0 0.18rem;border-radius:0.2rem;">(Unreadable)</span>');
+}
+
+function previewPercent(value: number, total: number) {
+  return roundPreviewNumber((value / Math.max(total, 1)) * 100);
+}
+
+function clampPreviewNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
+}
+
+function roundPreviewNumber(value: number) {
+  return Math.round(value * 100) / 100;
 }
 
 function textToPreviewHtml(text: string) {
