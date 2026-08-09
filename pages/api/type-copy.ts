@@ -30,6 +30,7 @@ const typeCopyOcrModel = process.env.TYPE_COPY_OCR_MODEL || 'gpt-4o-mini';
 const pdfRenderDpi = Number(process.env.TYPE_COPY_RENDER_DPI || 140);
 const maxOcrImageBytes = 18 * 1024 * 1024;
 const maxOcrOutputTokens = positiveNumber(process.env.TYPE_COPY_OCR_MAX_OUTPUT_TOKENS, 12000);
+const scannedOcrRegionCount = positiveNumber(process.env.TYPE_COPY_SCANNED_OCR_REGIONS, 4);
 const maxPdfPagesPerDocument = positiveNumber(process.env.TYPE_COPY_MAX_DOCUMENT_PAGES, 1000);
 const maxSynchronousScannedPages = positiveNumber(process.env.TYPE_COPY_MAX_SYNC_OCR_PAGES, 1);
 const maxSynchronousPdfPages = positiveNumber(process.env.TYPE_COPY_MAX_SYNC_PDF_PAGES, 120);
@@ -44,6 +45,7 @@ const allowedLayoutStyleProps = new Set([
   'margin-right',
   'margin-top',
   'margin-bottom',
+  'min-height',
   'padding',
   'border',
   'border-bottom',
@@ -59,6 +61,26 @@ const allowedLayoutStyleProps = new Set([
 interface OcrLayout {
   text: string;
   layoutHtml: string;
+}
+
+interface PdfPageImage {
+  width: number;
+  height: number;
+  kind?: number;
+  data: Uint8Array;
+}
+
+interface OcrImageRegion {
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface OcrRegionLayout {
+  region: OcrImageRegion;
+  layout: OcrLayout;
 }
 
 export const config = {
@@ -508,11 +530,11 @@ async function ocrUnreadablePdfPageImages(buffer: Buffer, pages: TypeCopyPage[])
       if (page.status !== 'not_readable') continue;
 
       try {
-        const image = await extractLargestPageImagePng(doc, page.pageNumber);
+        const image = await extractLargestPageImage(doc, page.pageNumber);
         if (!image) continue;
 
         handledAnyPage = true;
-        const layout = await ocrImageBuffer(image, page.pageNumber, 'image/png');
+        const layout = await ocrPdfPageImage(image, page.pageNumber);
 
         if (layout.text) {
           page.text = layout.text;
@@ -531,7 +553,7 @@ async function ocrUnreadablePdfPageImages(buffer: Buffer, pages: TypeCopyPage[])
   return handledAnyPage;
 }
 
-async function extractLargestPageImagePng(doc: any, pageNumber: number): Promise<Buffer | null> {
+async function extractLargestPageImage(doc: any, pageNumber: number): Promise<PdfPageImage | null> {
   const page = await doc.getPage(pageNumber);
   const ops = await page.getOperatorList();
   const imageNames = ops.fnArray
@@ -553,8 +575,7 @@ async function extractLargestPageImagePng(doc: any, pageNumber: number): Promise
     }
   }
 
-  if (!largestImage) return null;
-  return encodePdfJsImageAsPng(largestImage);
+  return largestImage || null;
 }
 
 function getPdfJsObject(objects: any, name: string) {
@@ -565,6 +586,252 @@ function getPdfJsObject(objects: any, name: string) {
       reject(error);
     }
   });
+}
+
+async function ocrPdfPageImage(image: PdfPageImage, pageNumber: number): Promise<OcrLayout> {
+  const regions = pageImageOcrRegions(image);
+
+  if (regions.length <= 1) {
+    return ocrImageBuffer(
+      encodePdfJsImageAsPng(image),
+      pageNumber,
+      'image/png',
+      `the full source page ${pageNumber}`,
+    );
+  }
+
+  const regionLayouts: OcrRegionLayout[] = [];
+
+  for (const region of regions) {
+    const cropped = cropPdfPageImage(image, region);
+    const layout = await ocrImageBuffer(
+      encodePdfJsImageAsPng(cropped),
+      pageNumber,
+      'image/png',
+      `${region.label} of source page ${pageNumber}`,
+    );
+
+    if (layout.text) {
+      regionLayouts.push({ region, layout });
+    }
+  }
+
+  if (regionLayouts.length) {
+    return combineRegionLayouts(regionLayouts, image.height);
+  }
+
+  return ocrImageBuffer(
+    encodePdfJsImageAsPng(image),
+    pageNumber,
+    'image/png',
+    `the full source page ${pageNumber}`,
+  );
+}
+
+function pageImageOcrRegions(image: PdfPageImage) {
+  const regionCount = clamp(Math.floor(scannedOcrRegionCount), 1, 6);
+  if (regionCount <= 1 || image.height < 1200) {
+    return [
+      {
+        label: 'full page',
+        x: 0,
+        y: 0,
+        width: image.width,
+        height: image.height,
+      },
+    ];
+  }
+
+  const regions: OcrImageRegion[] = [];
+  const breaks = verticalRegionBreaks(image, regionCount);
+
+  for (let index = 0; index < breaks.length - 1; index += 1) {
+    const y = breaks[index];
+    const nextY = breaks[index + 1];
+
+    regions.push({
+      label: `vertical region ${index + 1} of ${breaks.length - 1}`,
+      x: 0,
+      y,
+      width: image.width,
+      height: Math.max(1, nextY - y),
+    });
+  }
+
+  return regions;
+}
+
+function verticalRegionBreaks(image: PdfPageImage, regionCount: number) {
+  const height = Math.max(1, Math.floor(image.height));
+  const rowInk = rowInkProfile(image);
+  const minRegionHeight = Math.max(220, Math.floor(height / (regionCount * 3)));
+  const quietWindow = Math.max(8, Math.floor(height * 0.004));
+  const searchRadius = Math.max(80, Math.floor(height / (regionCount * 5)));
+  const breaks = [0];
+
+  for (let index = 1; index < regionCount; index += 1) {
+    const target = Math.round((height * index) / regionCount);
+    const lowerBound = Math.min(height - 1, Math.max(breaks[index - 1] + minRegionHeight, target - searchRadius));
+    const remainingRegions = regionCount - index;
+    const upperBound = Math.max(lowerBound, Math.min(height - minRegionHeight * remainingRegions, target + searchRadius));
+    const boundary = quietestBoundary(rowInk, target, lowerBound, upperBound, quietWindow);
+    breaks.push(boundary);
+  }
+
+  breaks.push(height);
+  return breaks;
+}
+
+function rowInkProfile(image: PdfPageImage) {
+  const width = Math.max(1, Math.floor(image.width));
+  const height = Math.max(1, Math.floor(image.height));
+  const kind = Number(image.kind || 1);
+  const data = Buffer.from(image.data);
+  const profile: number[] = [];
+
+  if (kind === 1) {
+    const lineSize = (width + 7) >> 3;
+
+    for (let row = 0; row < height; row += 1) {
+      let ones = 0;
+      const rowStart = row * lineSize;
+
+      for (let offset = 0; offset < lineSize; offset += 1) {
+        ones += bitCount(data[rowStart + offset]);
+      }
+
+      ones = Math.min(ones, width);
+      profile.push(Math.min(ones, width - ones));
+    }
+
+    return profile;
+  }
+
+  const bytesPerPixel = kind === 2 ? 3 : kind === 3 ? 4 : 0;
+  if (!bytesPerPixel) {
+    return Array.from({ length: height }, () => 1);
+  }
+
+  const lineSize = width * bytesPerPixel;
+
+  for (let row = 0; row < height; row += 1) {
+    let ink = 0;
+    const rowStart = row * lineSize;
+
+    for (let column = 0; column < width; column += 1) {
+      const pixelStart = rowStart + column * bytesPerPixel;
+      const red = data[pixelStart] || 0;
+      const green = data[pixelStart + 1] || red;
+      const blue = data[pixelStart + 2] || red;
+
+      if (Math.min(red, green, blue) < 245) ink += 1;
+    }
+
+    profile.push(ink);
+  }
+
+  return profile;
+}
+
+function quietestBoundary(rowInk: number[], target: number, lowerBound: number, upperBound: number, windowSize: number) {
+  let bestBoundary = clamp(target, lowerBound, upperBound);
+  let bestScore = Number.POSITIVE_INFINITY;
+  const halfWindow = Math.max(1, Math.floor(windowSize / 2));
+
+  for (let row = lowerBound; row <= upperBound; row += 1) {
+    let score = 0;
+    const start = Math.max(0, row - halfWindow);
+    const end = Math.min(rowInk.length - 1, row + halfWindow);
+
+    for (let sample = start; sample <= end; sample += 1) {
+      score += rowInk[sample] || 0;
+    }
+
+    const distance = Math.abs(row - target);
+    if (score < bestScore || (score === bestScore && distance < Math.abs(bestBoundary - target))) {
+      bestScore = score;
+      bestBoundary = row;
+    }
+  }
+
+  return bestBoundary;
+}
+
+function bitCount(value: number) {
+  value -= (value >> 1) & 0x55;
+  value = (value & 0x33) + ((value >> 2) & 0x33);
+  return ((value + (value >> 4)) & 0x0f) * 0x01;
+}
+
+function cropPdfPageImage(image: PdfPageImage, region: OcrImageRegion): PdfPageImage {
+  const sourceWidth = Math.max(1, Math.floor(image.width));
+  const sourceHeight = Math.max(1, Math.floor(image.height));
+  const x = clamp(Math.floor(region.x), 0, sourceWidth - 1);
+  const y = clamp(Math.floor(region.y), 0, sourceHeight - 1);
+  const width = clamp(Math.floor(region.width), 1, sourceWidth - x);
+  const height = clamp(Math.floor(region.height), 1, sourceHeight - y);
+  const kind = Number(image.kind || 1);
+  const sourceData = Buffer.from(image.data);
+
+  if (kind === 1) {
+    const sourceLineSize = (sourceWidth + 7) >> 3;
+    const targetLineSize = (width + 7) >> 3;
+    const targetData = Buffer.alloc(targetLineSize * height);
+
+    for (let row = 0; row < height; row += 1) {
+      for (let column = 0; column < width; column += 1) {
+        const sourceBit = readPackedBit(sourceData, (y + row) * sourceLineSize, x + column);
+        if (sourceBit) setPackedBit(targetData, row * targetLineSize, column);
+      }
+    }
+
+    return { width, height, kind, data: targetData };
+  }
+
+  const bytesPerPixel = kind === 2 ? 3 : kind === 3 ? 4 : 0;
+  if (!bytesPerPixel) throw new Error(`Unsupported PDF image kind: ${kind}`);
+
+  const sourceLineSize = sourceWidth * bytesPerPixel;
+  const targetLineSize = width * bytesPerPixel;
+  const targetData = Buffer.alloc(targetLineSize * height);
+
+  for (let row = 0; row < height; row += 1) {
+    const sourceStart = (y + row) * sourceLineSize + x * bytesPerPixel;
+    const targetStart = row * targetLineSize;
+    sourceData.copy(targetData, targetStart, sourceStart, sourceStart + targetLineSize);
+  }
+
+  return { width, height, kind, data: targetData };
+}
+
+function readPackedBit(data: Buffer, rowStart: number, x: number) {
+  return (data[rowStart + (x >> 3)] >> (7 - (x & 7))) & 1;
+}
+
+function setPackedBit(data: Buffer, rowStart: number, x: number) {
+  data[rowStart + (x >> 3)] |= 1 << (7 - (x & 7));
+}
+
+function combineRegionLayouts(regionLayouts: OcrRegionLayout[], sourceHeight: number): OcrLayout {
+  const sorted = regionLayouts.sort((a, b) => a.region.y - b.region.y);
+  const text = sorted
+    .map(({ layout }) => layout.text)
+    .filter(Boolean)
+    .join('\n\n');
+
+  const html = sorted.map(({ region, layout }) => {
+    const minHeight = Math.max(8, Math.round((region.height / Math.max(sourceHeight, 1)) * 68));
+    return [
+      `<div style="min-height:${minHeight}rem;margin:0;padding:0 0 0.8rem 0;white-space:pre-wrap;">`,
+      layout.layoutHtml || textToLayoutHtml(layout.text),
+      '</div>',
+    ].join('');
+  }).join('');
+
+  return {
+    text,
+    layoutHtml: `<div style="margin:0;white-space:pre-wrap;">${html}</div>`,
+  };
 }
 
 async function renderPdfPageToPng(pdfPath: string, pageNumber: number, tempDir: string) {
@@ -757,10 +1024,15 @@ async function ocrImageFile(imagePath: string, pageNumber: number, mimeType: str
   }
 
   const imageBuffer = await fs.promises.readFile(imagePath);
-  return ocrImageBuffer(imageBuffer, pageNumber, mimeType);
+  return ocrImageBuffer(imageBuffer, pageNumber, mimeType, `the full source page ${pageNumber}`);
 }
 
-async function ocrImageBuffer(imageBuffer: Buffer, pageNumber: number, mimeType: string): Promise<OcrLayout> {
+async function ocrImageBuffer(
+  imageBuffer: Buffer,
+  pageNumber: number,
+  mimeType: string,
+  scopeDescription = `the full source page ${pageNumber}`,
+): Promise<OcrLayout> {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is required for scanned-page OCR.');
   }
@@ -790,6 +1062,8 @@ async function ocrImageBuffer(imageBuffer: Buffer, pageNumber: number, mimeType:
           'Centered titles must be separate blocks with style="text-align:center". Right-side dates, page numbers, advocate names, signature blocks, and verification blocks must be separate blocks with style="text-align:right".',
           'When the source has left and right content on the same visual row, split it into separate aligned blocks or a two-column table so it does not become left-aligned text.',
           'Use HTML tables for source tables, with rows, columns, cell order, borders, and blank cells preserved.',
+          'For dense form pages where rows and filled fields are easier to preserve as typed lines, use a pre block with spaces and line breaks instead of stacked paragraphs.',
+          'If table boundaries are uncertain, preserve the visible line structure in pre rather than dropping fields or merging unrelated labels.',
           'Use text-align:center/right, margin-left, and table cell padding/borders to preserve headings, dates, signature blocks, and indentation.',
           'Do not flatten everything into left-aligned paragraphs. The layoutHtml must visually mimic the page.',
           'Do not return body, html, style, script, markdown, or code fences.',
@@ -808,7 +1082,8 @@ async function ocrImageBuffer(imageBuffer: Buffer, pageNumber: number, mimeType:
           {
             type: 'text',
             text: [
-              `Transcribe page ${pageNumber} exactly for a legal Type Copy.`,
+              `Transcribe ${scopeDescription} exactly for a legal Type Copy.`,
+              'If this image is a region or crop, transcribe only the text visible inside this crop and do not describe or infer missing content outside it.',
               'Return a JSON object with this exact shape:',
               '{"plainText":"...","layoutHtml":"..."}',
               'Never fill plainText or layoutHtml with repeated \\n characters or placeholder letters.',
@@ -1215,6 +1490,10 @@ function typeCopyErrorResponse(error: any) {
 function positiveNumber(value: string | undefined, fallback: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function isOpenAiQuotaError(error: any) {

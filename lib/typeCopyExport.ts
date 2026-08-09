@@ -45,14 +45,28 @@ export function buildTypeCopyPdf(text: string, metadata: TypeCopyExportMetadata)
     ],
     88,
   );
-  const content = pdfContent(lines.slice(0, 54));
+  const linesPerPage = 54;
+  const pageLines = chunkLines(lines, linesPerPage);
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "",
     "<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>",
-    `<< /Length ${byteLength(content)} >>\nstream\n${content}\nendstream`,
   ];
+  const pageObjectNumbers: number[] = [];
+
+  for (const page of pageLines) {
+    const pageObjectNumber = objects.length + 1;
+    const contentObjectNumber = pageObjectNumber + 1;
+    const content = pdfContent(page);
+
+    pageObjectNumbers.push(pageObjectNumber);
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObjectNumber} 0 R >>`,
+      `<< /Length ${byteLength(content)} >>\nstream\n${content}\nendstream`,
+    );
+  }
+
+  objects[1] = `<< /Type /Pages /Kids [${pageObjectNumbers.map((pageObjectNumber) => `${pageObjectNumber} 0 R`).join(" ")}] /Count ${pageObjectNumbers.length} >>`;
 
   return encoder.encode(pdf(objects));
 }
@@ -187,6 +201,16 @@ function wrapLines(lines: string[], width: number) {
     chunks.push(remaining);
     return chunks;
   });
+}
+
+function chunkLines(lines: string[], linesPerPage: number) {
+  const chunks: string[][] = [];
+
+  for (let index = 0; index < lines.length; index += linesPerPage) {
+    chunks.push(lines.slice(index, index + linesPerPage));
+  }
+
+  return chunks.length ? chunks : [[""]];
 }
 
 function escapeXml(value: string) {
