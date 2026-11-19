@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { useRouter } from 'next/router';
+import { upload } from '@vercel/blob/client';
 import { AlertTriangle, ArrowLeft, FileText, ScanText, UploadCloud, Wand2, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -82,6 +83,19 @@ export function TypeCopyWorkspace() {
     setError('');
 
     try {
+      const jobId = `typecopy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setProcessingMessage('Uploading the document securely...');
+      const blob = await upload(`type-copy/sources/${jobId}/${file.name}`, file, {
+        access: 'private',
+        handleUploadUrl: '/api/type-copy-upload',
+        clientPayload: JSON.stringify({ jobId, fileName: file.name, fileSize: file.size }),
+        multipart: file.size > 4 * 1024 * 1024,
+      });
+      setProcessingMessage('Starting durable Type Copy processing...');
+      await createRemoteTypeCopyJob(file, jobId, blob.url);
+      router.push('/type-copy-results');
+      return;
+
       const { ok, payload } = await postTypeCopyFileWithRateLimitRetry(
         file,
         {},
@@ -101,7 +115,7 @@ export function TypeCopyWorkspace() {
       }
 
       setProcessingMessage('Saving Type Copy preview...');
-      await saveTypeCopyResult(payload.data);
+      await saveTypeCopyResult((payload as { data: Parameters<typeof saveTypeCopyResult>[0] }).data);
       await clearTypeCopyJob();
       router.push('/type-copy-results');
     } catch (err: any) {
@@ -229,11 +243,47 @@ export function TypeCopyWorkspace() {
   );
 }
 
+async function createRemoteTypeCopyJob(file: File, jobId: string, sourceUrl: string) {
+  const updatedAt = new Date().toISOString();
+  const documentId = documentIdFor(file.name);
+  const extension = extensionFor(file.name);
+  const message = 'Upload complete. Type Copy is starting in the background...';
+  await saveTypeCopyResult({
+    fileName: file.name,
+    fileSize: file.size,
+    extension,
+    documentId,
+    processedAt: new Date().toLocaleString(),
+    pageCount: 0,
+    pages: [],
+    draftText: buildTypeCopyDraftText(file.name, documentId, [], 0),
+    processing: { jobId, status: 'queued', processedPages: 0, totalPages: 0, nextPage: 1, chunkSize: 1, scanned: true, message, updatedAt },
+  });
+  await saveTypeCopyJob({
+    jobId,
+    remote: true,
+    fileName: file.name,
+    fileSize: file.size,
+    extension,
+    documentId,
+    pageCount: 0,
+    chunkSize: 1,
+    scanned: true,
+    nextPage: 1,
+    status: 'queued',
+    retryCount: 0,
+    message,
+    createdAt: updatedAt,
+    updatedAt,
+  });
+  void sourceUrl;
+}
+
 async function createBackgroundTypeCopyJob(
   file: File,
   initialPayload: {
-    success: false;
-    message: string;
+    success: boolean;
+    message?: string;
     pageCount?: number;
     chunkSize?: number;
     scanned?: boolean;

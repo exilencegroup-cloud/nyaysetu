@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
 import { deflateSync } from 'zlib';
+import { get as getBlob } from '@vercel/blob';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import formidable from 'formidable';
 import type { Fields } from 'formidable';
@@ -169,6 +170,57 @@ interface PdfInfo {
 interface PageRange {
   start: number;
   end: number;
+}
+
+export interface StoredTypeCopyInput {
+  blobUrl: string;
+  fileName: string;
+  fileSize: number;
+  pageStart: number;
+  pageEnd: number;
+}
+
+export async function processStoredTypeCopyRange(input: StoredTypeCopyInput): Promise<TypeCopyResult> {
+  const extension = extensionFor(input.fileName);
+  if (!supportedTypeCopyExtensions.has(extension)) {
+    throw new Error('Unsupported Type Copy file.');
+  }
+
+  const blob = await getBlob(input.blobUrl, { access: 'private', useCache: false });
+  if (!blob?.stream) throw new Error('The uploaded source document is no longer available.');
+
+  const buffer = Buffer.from(await new Response(blob.stream).arrayBuffer());
+  const pdfInfo = extension === 'pdf' ? await inspectPdfBeforeExtraction(buffer) : null;
+  if (pdfInfo) guardPdfDocumentPageLimit(pdfInfo);
+  const pageCount = pdfInfo?.pageCount || 1;
+  const pageRange = pdfInfo ? {
+    start: clamp(Math.floor(input.pageStart), 1, pageCount),
+    end: clamp(Math.floor(input.pageEnd), 1, pageCount),
+  } : null;
+  if (pageRange && pageRange.end < pageRange.start) pageRange.end = pageRange.start;
+
+  const extensionSuffix = extension === 'jpeg' ? 'jpg' : extension;
+  const temporaryPath = path.join(os.tmpdir(), `nyaysetu-type-copy-${Date.now()}-${Math.random().toString(36).slice(2)}.${extensionSuffix}`);
+  fs.writeFileSync(temporaryPath, buffer);
+
+  try {
+    const pages = extension === 'pdf'
+      ? await extractPdfPages(buffer, temporaryPath, input.fileName, pdfInfo, pageRange)
+      : await extractImagePage(temporaryPath, extension);
+    const documentId = documentIdFor(input.fileName);
+    return {
+      fileName: input.fileName,
+      fileSize: input.fileSize,
+      extension,
+      documentId,
+      processedAt: new Date().toLocaleString(),
+      pageCount,
+      pages,
+      draftText: buildTypeCopyDraftText(input.fileName, documentId, pages, pageCount),
+    };
+  } finally {
+    if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+  }
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<ApiResponse>) {

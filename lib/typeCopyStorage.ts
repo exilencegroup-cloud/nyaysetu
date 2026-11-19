@@ -8,7 +8,8 @@ const indexedDbMarker = '__indexeddb__';
 
 export interface TypeCopyJob {
   jobId: string;
-  file: File;
+  file?: File;
+  remote?: boolean;
   fileName: string;
   fileSize: number;
   extension: string;

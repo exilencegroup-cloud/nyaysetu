@@ -40,3 +40,4 @@ next-env.d.ts
 .superpowers/
 .worktrees/
 .codex-next-dev*.log
+/.swc

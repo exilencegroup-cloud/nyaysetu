@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+const { withWorkflow } = require('workflow/next');
+
 const nextConfig = {
   async redirects() {
     return [
@@ -11,4 +13,4 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+module.exports = withWorkflow(nextConfig);
