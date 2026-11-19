@@ -80,6 +80,16 @@ interface InternalOcrLine {
   width: number;
   height: number;
   confidence?: number;
+  words?: InternalOcrWord[];
+}
+
+interface InternalOcrWord {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  confidence?: number;
 }
 
 interface InternalOcrResponse {
@@ -1227,6 +1237,7 @@ function internalOcrResponseToLayout(raw: unknown): OcrLayout {
       y: Number(line?.y),
       width: Number(line?.width),
       height: Number(line?.height),
+      words: Array.isArray(line?.words) ? line.words : [],
     }))
     .filter((line) => line.text && [line.x, line.y, line.width, line.height].every(Number.isFinite))
     .sort((left, right) => left.y - right.y || left.x - right.x);
@@ -1266,17 +1277,31 @@ function internalOcrResponseToLayout(raw: unknown): OcrLayout {
     const label = mark.kind === 'signature' ? '(Signature)' : '(Seal)';
     return `<span style="position:absolute;left:${left}px;top:${top}px;font-size:${fontSize}px;font-weight:600;line-height:1.2;white-space:pre">${label}</span>`;
   }).join('');
-  const lineHtml = positionedLines.map((line) => {
+  const positionedWords = positionedLines.flatMap((line) => line.words.map((word) => ({
+    text: normalizeExtractedText(String(word?.text || '')),
+    x: Number(word?.x),
+    y: Number(word?.y),
+    width: Number(word?.width),
+    height: Number(word?.height),
+  })))
+    .filter((word) => word.text && [word.x, word.y, word.width, word.height].every(Number.isFinite));
+  const wordHtml = positionedWords.map((word) => {
+    const left = clamp(Math.round(word.x * scale), 0, pageWidth);
+    const top = clamp(Math.round(word.y * scale), 0, pageHeight);
+    const fontSize = clamp(Math.round(Math.max(word.height * scale * 0.82, 10)), 10, 24);
+    return `<span style="position:absolute;left:${left}px;top:${top}px;font-size:${fontSize}px;line-height:1.2;white-space:pre">${escapeHtml(word.text)}</span>`;
+  }).join('');
+  const lineHtml = positionedWords.length === 0 ? positionedLines.map((line) => {
     const left = clamp(Math.round(line.x * scale), 0, pageWidth);
     const top = clamp(Math.round(line.y * scale), 0, pageHeight);
     const fontSize = clamp(Math.round(Math.max(line.height * scale * 0.82, 10)), 10, 24);
     const lineWidth = clamp(Math.round(line.width * scale), 1, pageWidth - left);
     return `<span style="position:absolute;left:${left}px;top:${top}px;width:${lineWidth}px;font-size:${fontSize}px;line-height:1.2;white-space:pre">${escapeHtml(line.text)}</span>`;
-  }).join('');
+  }).join('') : '';
 
   return {
     text,
-    layoutHtml: sanitizeLayoutHtml(`<div style="position:relative;width:${pageWidth}px;min-height:${pageHeight}px">${tableHtml}${lineHtml}${markHtml}</div>`),
+    layoutHtml: sanitizeLayoutHtml(`<div style="position:relative;width:${pageWidth}px;min-height:${pageHeight}px">${tableHtml}${wordHtml}${lineHtml}${markHtml}</div>`),
   };
 }
 

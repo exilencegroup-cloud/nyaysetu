@@ -17,6 +17,15 @@ DEFAULT_MIN_CONFIDENCE = 55.0
 app = FastAPI(title="NyaySetu Internal OCR", version="0.1.0")
 
 
+class OcrWord(BaseModel):
+    text: str
+    x: int
+    y: int
+    width: int
+    height: int
+    confidence: float
+
+
 class OcrLine(BaseModel):
     text: str
     x: int
@@ -24,6 +33,7 @@ class OcrLine(BaseModel):
     width: int
     height: int
     confidence: float
+    words: list[OcrWord]
 
 
 class OcrTableCell(BaseModel):
@@ -111,7 +121,7 @@ def prepare_image(image: np.ndarray) -> np.ndarray:
 
 
 def to_lines(data: dict, minimum_confidence: float) -> list[OcrLine]:
-    grouped: dict[tuple[int, int, int], list[dict]] = defaultdict(list)
+    grouped: dict[tuple[int, int, int], list[OcrWord]] = defaultdict(list)
     count = len(data.get("text", []))
 
     for index in range(count):
@@ -126,32 +136,31 @@ def to_lines(data: dict, minimum_confidence: float) -> list[OcrLine]:
             int(data["par_num"][index]),
             int(data["line_num"][index]),
         )
-        grouped[key].append(
-            {
-                "text": text,
-                "confidence": confidence,
-                "x": int(data["left"][index]),
-                "y": int(data["top"][index]),
-                "width": int(data["width"][index]),
-                "height": int(data["height"][index]),
-            }
-        )
+        grouped[key].append(OcrWord(
+            text=text,
+            confidence=confidence,
+            x=int(data["left"][index]),
+            y=int(data["top"][index]),
+            width=int(data["width"][index]),
+            height=int(data["height"][index]),
+        ))
 
     lines: list[OcrLine] = []
     for words in grouped.values():
-        words.sort(key=lambda word: word["x"])
-        x = min(word["x"] for word in words)
-        y = min(word["y"] for word in words)
-        right = max(word["x"] + word["width"] for word in words)
-        bottom = max(word["y"] + word["height"] for word in words)
+        words.sort(key=lambda word: word.x)
+        x = min(word.x for word in words)
+        y = min(word.y for word in words)
+        right = max(word.x + word.width for word in words)
+        bottom = max(word.y + word.height for word in words)
         lines.append(
             OcrLine(
-                text=" ".join(word["text"] for word in words),
+                text=" ".join(word.text for word in words),
                 x=x,
                 y=y,
                 width=max(1, right - x),
                 height=max(1, bottom - y),
-                confidence=min(word["confidence"] for word in words),
+                confidence=min(word.confidence for word in words),
+                words=words,
             )
         )
 
