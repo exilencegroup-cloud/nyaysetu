@@ -1,4 +1,31 @@
 {
-  "buildCommand": "npm run build",
-  "installCommand": "npm install"
+  "services": {
+    "web": {
+      "root": ".",
+      "framework": "nextjs",
+      "buildCommand": "npm run build",
+      "installCommand": "npm install",
+      "bindings": [
+        {
+          "type": "service",
+          "service": "ocr-worker",
+          "format": "url",
+          "env": "INTERNAL_OCR_WORKER_URL"
+        }
+      ]
+    },
+    "ocr-worker": {
+      "root": "ocr-worker",
+      "runtime": "container",
+      "entrypoint": "Dockerfile"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "web"
+      }
+    }
+  ]
 }
