@@ -37,6 +37,8 @@ const maxSynchronousPdfPages = positiveNumber(process.env.TYPE_COPY_MAX_SYNC_PDF
 const ocrRateLimitRetryAfterSeconds = positiveNumber(process.env.TYPE_COPY_OCR_RATE_LIMIT_RETRY_SECONDS, 25);
 const rateLimitedOcrChunkSize = positiveNumber(process.env.TYPE_COPY_RATE_LIMIT_OCR_CHUNK_PAGES, 3);
 const minimumMeaningfulOcrChars = 4;
+const internalOcrWorkerUrl = (process.env.INTERNAL_OCR_WORKER_URL || '').replace(/\/$/, '');
+const internalOcrTimeoutMs = positiveNumber(process.env.INTERNAL_OCR_TIMEOUT_MS, 120_000);
 const textLayerSampleThreshold = 40;
 const allowedLayoutHtmlTags = new Set(['div', 'p', 'span', 'br', 'strong', 'em', 'u', 'pre', 'table', 'thead', 'tbody', 'tr', 'th', 'td']);
 const allowedLayoutStyleProps = new Set([
@@ -56,11 +58,32 @@ const allowedLayoutStyleProps = new Set([
   'width',
   'font-weight',
   'white-space',
+  'position',
+  'left',
+  'top',
+  'font-size',
+  'line-height',
+  'display',
 ]);
 
 interface OcrLayout {
   text: string;
   layoutHtml: string;
+}
+
+interface InternalOcrLine {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  confidence?: number;
+}
+
+interface InternalOcrResponse {
+  width: number;
+  height: number;
+  lines: InternalOcrLine[];
 }
 
 interface PdfPageImage {
@@ -464,7 +487,7 @@ async function ocrUnreadablePdfPages(
   pages: TypeCopyPage[],
   totalPageCount: number,
 ) {
-  if (!process.env.OPENAI_API_KEY) {
+  if (!internalOcrWorkerUrl && !process.env.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is required for scanned-page OCR.');
   }
 
@@ -484,14 +507,15 @@ async function ocrUnreadablePdfPages(
   }
 
   await ocrUnreadablePdfPageImages(buffer, pages);
-  if (!pages.some((page) => page.status === 'not_readable')) return;
+  const needsFallback = () => pages.some((page) => page.status === 'not_readable' && !isNotReadableText(page.text));
+  if (!needsFallback()) return;
 
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'nyaysetu-type-copy-'));
   let renderUnavailable = false;
 
   try {
     for (const page of pages) {
-      if (page.status !== 'not_readable') continue;
+      if (page.status !== 'not_readable' || isNotReadableText(page.text)) continue;
 
       try {
         const imagePath = await renderPdfPageToPng(pdfPath, page.pageNumber, tempDir);
@@ -516,7 +540,7 @@ async function ocrUnreadablePdfPages(
     await fs.promises.rm(tempDir, { recursive: true, force: true });
   }
 
-  if (renderUnavailable && pages.some((page) => page.status === 'not_readable')) {
+  if (renderUnavailable && needsFallback() && !internalOcrWorkerUrl) {
     await ocrPdfViaFileInput(pdfPath, fileName, pages);
   }
 }
@@ -527,7 +551,7 @@ async function ocrUnreadablePdfPageImages(buffer: Buffer, pages: TypeCopyPage[])
 
   try {
     for (const page of pages) {
-      if (page.status !== 'not_readable') continue;
+      if (page.status !== 'not_readable' || isNotReadableText(page.text)) continue;
 
       try {
         const image = await extractLargestPageImage(doc, page.pageNumber);
@@ -895,7 +919,7 @@ function isPdfRenderUnavailable(error: unknown) {
 }
 
 async function ocrPdfViaFileInput(pdfPath: string, fileName: string, pages: TypeCopyPage[]) {
-  const targetPages = pages.filter((page) => page.status === 'not_readable');
+  const targetPages = pages.filter((page) => page.status === 'not_readable' && !isNotReadableText(page.text));
   if (targetPages.length === 0) return;
 
   const uploaded = await openai.files.create({
@@ -1025,10 +1049,6 @@ async function findRenderedPage(tempDir: string, prefix: string) {
 }
 
 async function ocrImageFile(imagePath: string, pageNumber: number, mimeType: string): Promise<OcrLayout> {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is required for scanned-page OCR.');
-  }
-
   const imageBuffer = await fs.promises.readFile(imagePath);
   return ocrImageBuffer(imageBuffer, pageNumber, mimeType, `the full source page ${pageNumber}`);
 }
@@ -1039,12 +1059,16 @@ async function ocrImageBuffer(
   mimeType: string,
   scopeDescription = `the full source page ${pageNumber}`,
 ): Promise<OcrLayout> {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is required for scanned-page OCR.');
-  }
-
   if (imageBuffer.length > maxOcrImageBytes) {
     throw new Error('Image is too large for OCR.');
+  }
+
+  if (internalOcrWorkerUrl) {
+    return ocrWithInternalWorker(imageBuffer, mimeType);
+  }
+
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('No OCR engine is configured for scanned-page OCR.');
   }
 
   const completion = await openai.chat.completions.create({
@@ -1133,6 +1157,70 @@ async function ocrImageBuffer(
   }
 
   return parsed;
+}
+
+async function ocrWithInternalWorker(imageBuffer: Buffer, mimeType: string): Promise<OcrLayout> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), internalOcrTimeoutMs);
+
+  try {
+    const form = new FormData();
+    form.set('file', new Blob([Uint8Array.from(imageBuffer)], { type: mimeType }), 'type-copy-page');
+    const response = await fetch(`${internalOcrWorkerUrl}/v1/ocr`, {
+      method: 'POST',
+      body: form,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Internal OCR worker returned ${response.status}.`);
+    }
+
+    return internalOcrResponseToLayout(await response.json());
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function internalOcrResponseToLayout(raw: unknown): OcrLayout {
+  const response = raw as Partial<InternalOcrResponse>;
+  const sourceWidth = Number(response.width);
+  const sourceHeight = Number(response.height);
+  const lines = Array.isArray(response.lines) ? response.lines : [];
+
+  if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) || sourceWidth <= 0 || sourceHeight <= 0) {
+    throw new Error('Internal OCR worker returned invalid page geometry.');
+  }
+
+  const pageWidth = 680;
+  const scale = pageWidth / sourceWidth;
+  const pageHeight = Math.max(320, Math.round(sourceHeight * scale));
+  const positionedLines = lines
+    .map((line) => ({
+      text: normalizeExtractedText(String(line?.text || '')),
+      x: Number(line?.x),
+      y: Number(line?.y),
+      width: Number(line?.width),
+      height: Number(line?.height),
+    }))
+    .filter((line) => line.text && [line.x, line.y, line.width, line.height].every(Number.isFinite))
+    .sort((left, right) => left.y - right.y || left.x - right.x);
+
+  if (positionedLines.length === 0) return unreadableLayout();
+
+  const text = positionedLines.map((line) => line.text).join('\n');
+  const html = positionedLines.map((line) => {
+    const left = clamp(Math.round(line.x * scale), 0, pageWidth);
+    const top = clamp(Math.round(line.y * scale), 0, pageHeight);
+    const fontSize = clamp(Math.round(Math.max(line.height * scale * 0.82, 10)), 10, 24);
+    const lineWidth = clamp(Math.round(line.width * scale), 1, pageWidth - left);
+    return `<span style="position:absolute;left:${left}px;top:${top}px;width:${lineWidth}px;font-size:${fontSize}px;line-height:1.2;white-space:pre">${escapeHtml(line.text)}</span>`;
+  }).join('');
+
+  return {
+    text,
+    layoutHtml: sanitizeLayoutHtml(`<div style="position:relative;width:${pageWidth}px;min-height:${pageHeight}px">${html}</div>`),
+  };
 }
 
 function encodePdfJsImageAsPng(image: { width: number; height: number; kind?: number; data: Uint8Array }) {
@@ -1417,7 +1505,8 @@ function sanitizeStyle(style: string) {
       const value = valueParts.join(':').trim();
 
       if (!allowedLayoutStyleProps.has(prop)) return '';
-      if (/url|expression|javascript|position\s*:|fixed|absolute/i.test(value)) return '';
+      if (prop === 'position' && value !== 'relative' && value !== 'absolute') return '';
+      if (/url|expression|javascript|fixed/i.test(value)) return '';
 
       return `${prop}:${value}`;
     })
