@@ -64,6 +64,8 @@ const allowedLayoutStyleProps = new Set([
   'font-size',
   'line-height',
   'display',
+  'height',
+  'box-sizing',
 ]);
 
 interface OcrLayout {
@@ -84,6 +86,18 @@ interface InternalOcrResponse {
   width: number;
   height: number;
   lines: InternalOcrLine[];
+  tables?: InternalOcrTable[];
+}
+
+interface InternalOcrTableCell {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface InternalOcrTable {
+  cells: InternalOcrTableCell[];
 }
 
 interface PdfPageImage {
@@ -1187,6 +1201,7 @@ function internalOcrResponseToLayout(raw: unknown): OcrLayout {
   const sourceWidth = Number(response.width);
   const sourceHeight = Number(response.height);
   const lines = Array.isArray(response.lines) ? response.lines : [];
+  const tables = Array.isArray(response.tables) ? response.tables : [];
 
   if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) || sourceWidth <= 0 || sourceHeight <= 0) {
     throw new Error('Internal OCR worker returned invalid page geometry.');
@@ -1209,7 +1224,23 @@ function internalOcrResponseToLayout(raw: unknown): OcrLayout {
   if (positionedLines.length === 0) return unreadableLayout();
 
   const text = positionedLines.map((line) => line.text).join('\n');
-  const html = positionedLines.map((line) => {
+  const positionedCells = tables
+    .flatMap((table) => Array.isArray(table?.cells) ? table.cells : [])
+    .map((cell) => ({
+      x: Number(cell?.x),
+      y: Number(cell?.y),
+      width: Number(cell?.width),
+      height: Number(cell?.height),
+    }))
+    .filter((cell) => [cell.x, cell.y, cell.width, cell.height].every(Number.isFinite));
+  const tableHtml = positionedCells.map((cell) => {
+    const left = clamp(Math.round(cell.x * scale), 0, pageWidth);
+    const top = clamp(Math.round(cell.y * scale), 0, pageHeight);
+    const width = clamp(Math.round(cell.width * scale), 1, pageWidth - left);
+    const height = clamp(Math.round(cell.height * scale), 1, pageHeight - top);
+    return `<div style="position:absolute;left:${left}px;top:${top}px;width:${width}px;height:${height}px;border:1px solid #64748b;box-sizing:border-box"></div>`;
+  }).join('');
+  const lineHtml = positionedLines.map((line) => {
     const left = clamp(Math.round(line.x * scale), 0, pageWidth);
     const top = clamp(Math.round(line.y * scale), 0, pageHeight);
     const fontSize = clamp(Math.round(Math.max(line.height * scale * 0.82, 10)), 10, 24);
@@ -1219,7 +1250,7 @@ function internalOcrResponseToLayout(raw: unknown): OcrLayout {
 
   return {
     text,
-    layoutHtml: sanitizeLayoutHtml(`<div style="position:relative;width:${pageWidth}px;min-height:${pageHeight}px">${html}</div>`),
+    layoutHtml: sanitizeLayoutHtml(`<div style="position:relative;width:${pageWidth}px;min-height:${pageHeight}px">${tableHtml}${lineHtml}</div>`),
   };
 }
 

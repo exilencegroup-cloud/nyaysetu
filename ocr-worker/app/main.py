@@ -26,10 +26,22 @@ class OcrLine(BaseModel):
     confidence: float
 
 
+class OcrTableCell(BaseModel):
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+class OcrTable(BaseModel):
+    cells: list[OcrTableCell]
+
+
 class OcrResult(BaseModel):
     width: int
     height: int
     lines: list[OcrLine]
+    tables: list[OcrTable]
 
 
 @app.get("/health")
@@ -61,7 +73,12 @@ async def ocr_page(
     except pytesseract.TesseractError as error:
         raise HTTPException(status_code=422, detail=f"OCR could not process this page: {error}") from error
 
-    return OcrResult(width=width, height=height, lines=to_lines(raw, minimum_confidence))
+    return OcrResult(
+        width=width,
+        height=height,
+        lines=to_lines(raw, minimum_confidence),
+        tables=detect_tables(prepared),
+    )
 
 
 def decode_image(image_bytes: bytes) -> np.ndarray:
@@ -126,6 +143,72 @@ def to_lines(data: dict, minimum_confidence: float) -> list[OcrLine]:
         )
 
     return sorted(lines, key=lambda line: (line.y, line.x))
+
+
+def detect_tables(image: np.ndarray) -> list[OcrTable]:
+    """Find ruled table grids without changing the page coordinate system."""
+    height, width = image.shape[:2]
+    binary = cv2.adaptiveThreshold(
+        image,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        31,
+        11,
+    )
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(24, width // 28), 1))
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(24, height // 40)))
+    horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel)
+    vertical = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel)
+    grid = cv2.bitwise_or(horizontal, vertical)
+
+    contours, _ = cv2.findContours(grid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    tables: list[OcrTable] = []
+    page_area = width * height
+
+    for contour in contours:
+        x, y, table_width, table_height = cv2.boundingRect(contour)
+        if table_width * table_height < page_area * 0.025 or table_width < width * 0.18 or table_height < 36:
+            continue
+
+        x_lines = line_positions(vertical[y:y + table_height, x:x + table_width], axis=0)
+        y_lines = line_positions(horizontal[y:y + table_height, x:x + table_width], axis=1)
+        if len(x_lines) < 2 or len(y_lines) < 2:
+            continue
+
+        cells = []
+        for left, right in zip(x_lines, x_lines[1:]):
+            for top, bottom in zip(y_lines, y_lines[1:]):
+                cell_width = right - left
+                cell_height = bottom - top
+                if cell_width < 8 or cell_height < 8:
+                    continue
+                cells.append(OcrTableCell(x=x + left, y=y + top, width=cell_width, height=cell_height))
+
+        if cells:
+            tables.append(OcrTable(cells=cells))
+
+    return sorted(tables, key=lambda table: (min(cell.y for cell in table.cells), min(cell.x for cell in table.cells)))
+
+
+def line_positions(image: np.ndarray, axis: int) -> list[int]:
+    projection = np.count_nonzero(image, axis=axis)
+    threshold = max(2, int(image.shape[axis] * 0.35))
+    active = np.where(projection >= threshold)[0]
+    if active.size == 0:
+        return []
+
+    positions: list[int] = []
+    run_start = int(active[0])
+    previous = int(active[0])
+    for value in active[1:]:
+        current = int(value)
+        if current > previous + 1:
+            positions.append((run_start + previous) // 2)
+            run_start = current
+        previous = current
+    positions.append((run_start + previous) // 2)
+    return positions
 
 
 def parse_confidence(value: object) -> float:
