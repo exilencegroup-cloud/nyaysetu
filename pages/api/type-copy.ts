@@ -947,8 +947,9 @@ async function transcribePdfPageRange(fileId: string, fileName: string, pageNumb
     instructions: [
       'You convert scanned legal PDF pages into Type Copy with a formatted layout preview.',
       'Transcribe only visible text. Do not summarize, translate, explain, or add commentary.',
-      'Preserve the original language and script exactly: Hindi/Marathi/Sanskrit in Devanagari, Gujarati in Gujarati script, English in Latin script, Urdu in Urdu script, and mixed-language lines in the same mixed scripts as the source.',
-      'Do not transliterate, romanize, normalize into English, or change one Indian script into another. Copy names, places, numbers, punctuation, and legal terms word-for-word from the source.',
+      'Before transcribing, visually identify the script of every text block and every mixed-script line. Then reproduce each script exactly as it appears in the source.',
+      'Preserve the original language and script exactly: Hindi, Marathi, and Sanskrit in Devanagari; Gujarati in Gujarati script; English in Latin script; Urdu in Urdu script; and mixed-language lines in the same mixed scripts as the source.',
+      'Do not translate, transliterate, romanize, normalize into English, substitute one Indian script for another, or silently correct spelling. Copy names, places, numbers, punctuation, legal terms, and dates word-for-word from the source.',
       'Include every visible printed label, filled value, handwritten annotation, margin note, stamp text, seal text, page number, date, section number, list marker, punctuation mark, and underlined value.',
       'Never compress, paraphrase, merge, or skip repeated form labels just because they look boilerplate.',
       'Return JSON only.',
@@ -1056,8 +1057,9 @@ async function ocrImageBuffer(
         content: [
           'You convert scanned legal document pages into Type Copy with a formatted layout preview.',
           'Transcribe only visible text. Do not summarize, translate, or add commentary.',
-          'Preserve the original language and script exactly: Hindi/Marathi/Sanskrit in Devanagari, Gujarati in Gujarati script, English in Latin script, Urdu in Urdu script, and mixed-language lines in the same mixed scripts as the source.',
-          'Do not transliterate, romanize, normalize into English, or change one Indian script into another. Copy names, places, numbers, punctuation, and legal terms word-for-word from the source.',
+          'Before transcribing, visually identify the script of every text block and every mixed-script line. Then reproduce each script exactly as it appears in the source.',
+          'Preserve the original language and script exactly: Hindi, Marathi, and Sanskrit in Devanagari; Gujarati in Gujarati script; English in Latin script; Urdu in Urdu script; and mixed-language lines in the same mixed scripts as the source.',
+          'Do not translate, transliterate, romanize, normalize into English, substitute one Indian script for another, or silently correct spelling. Copy names, places, numbers, punctuation, legal terms, and dates word-for-word from the source.',
           'Include every visible printed label, filled value, handwritten annotation, margin note, stamp text, seal text, page number, date, section number, list marker, punctuation mark, and underlined value.',
           'Never compress, paraphrase, merge, or skip repeated form labels just because they look boilerplate.',
           'Return JSON only.',
