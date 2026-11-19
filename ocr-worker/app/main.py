@@ -37,11 +37,21 @@ class OcrTable(BaseModel):
     cells: list[OcrTableCell]
 
 
+class OcrMark(BaseModel):
+    kind: str
+    x: int
+    y: int
+    width: int
+    height: int
+    confidence: float
+
+
 class OcrResult(BaseModel):
     width: int
     height: int
     lines: list[OcrLine]
     tables: list[OcrTable]
+    marks: list[OcrMark]
 
 
 @app.get("/health")
@@ -73,11 +83,14 @@ async def ocr_page(
     except pytesseract.TesseractError as error:
         raise HTTPException(status_code=422, detail=f"OCR could not process this page: {error}") from error
 
+    lines = to_lines(raw, minimum_confidence)
+    tables = detect_tables(prepared)
     return OcrResult(
         width=width,
         height=height,
-        lines=to_lines(raw, minimum_confidence),
-        tables=detect_tables(prepared),
+        lines=lines,
+        tables=tables,
+        marks=detect_marks(prepared, raw, minimum_confidence, tables),
     )
 
 
@@ -189,6 +202,91 @@ def detect_tables(image: np.ndarray) -> list[OcrTable]:
             tables.append(OcrTable(cells=cells))
 
     return sorted(tables, key=lambda table: (min(cell.y for cell in table.cells), min(cell.x for cell in table.cells)))
+
+
+def detect_marks(
+    image: np.ndarray,
+    data: dict,
+    minimum_confidence: float,
+    tables: list[OcrTable],
+) -> list[OcrMark]:
+    """Find only high-confidence signature and seal candidates outside recognized text."""
+    height, width = image.shape[:2]
+    binary = cv2.adaptiveThreshold(
+        image,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        31,
+        11,
+    )
+    text_mask = np.zeros_like(binary)
+    for index, value in enumerate(data.get("text", [])):
+        if not str(value or "").strip() or parse_confidence(data["conf"][index]) < minimum_confidence:
+            continue
+        x, y = int(data["left"][index]), int(data["top"][index])
+        word_width, word_height = int(data["width"][index]), int(data["height"][index])
+        cv2.rectangle(text_mask, (max(0, x - 3), max(0, y - 3)), (x + word_width + 3, y + word_height + 3), 255, -1)
+
+    table_mask = np.zeros_like(binary)
+    for table in tables:
+        for cell in table.cells:
+            cv2.rectangle(
+                table_mask,
+                (cell.x, cell.y),
+                (cell.x + cell.width, cell.y + cell.height),
+                255,
+                thickness=4,
+            )
+
+    remaining = cv2.bitwise_and(binary, cv2.bitwise_not(text_mask))
+    remaining = cv2.bitwise_and(remaining, cv2.bitwise_not(table_mask))
+    grouped = cv2.morphologyEx(
+        remaining,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (max(18, width // 70), max(3, height // 350))),
+    )
+    contours, _ = cv2.findContours(grouped, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    marks: list[OcrMark] = []
+
+    for contour in contours:
+        x, y, mark_width, mark_height = cv2.boundingRect(contour)
+        area = mark_width * mark_height
+        if area < width * height * 0.00018 or mark_width < 28 or mark_height < 10:
+            continue
+
+        source = remaining[y:y + mark_height, x:x + mark_width]
+        density = cv2.countNonZero(source) / max(area, 1)
+        aspect = mark_width / max(mark_height, 1)
+        lower_page = y >= height * 0.28
+
+        if lower_page and aspect >= 2.4 and 0.015 <= density <= 0.38:
+            marks.append(OcrMark(kind="signature", x=x, y=y, width=mark_width, height=mark_height, confidence=0.8))
+        elif 0.65 <= aspect <= 1.55 and min(mark_width, mark_height) >= 34 and 0.07 <= density <= 0.5:
+            marks.append(OcrMark(kind="seal", x=x, y=y, width=mark_width, height=mark_height, confidence=0.7))
+
+    return deduplicate_marks(marks)[:6]
+
+
+def deduplicate_marks(marks: list[OcrMark]) -> list[OcrMark]:
+    ordered = sorted(marks, key=lambda mark: mark.width * mark.height, reverse=True)
+    unique: list[OcrMark] = []
+    for mark in ordered:
+        if all(overlap_ratio(mark, existing) < 0.45 for existing in unique):
+            unique.append(mark)
+    return sorted(unique, key=lambda mark: (mark.y, mark.x))
+
+
+def overlap_ratio(left: OcrMark, right: OcrMark) -> float:
+    intersection_left = max(left.x, right.x)
+    intersection_top = max(left.y, right.y)
+    intersection_right = min(left.x + left.width, right.x + right.width)
+    intersection_bottom = min(left.y + left.height, right.y + right.height)
+    if intersection_right <= intersection_left or intersection_bottom <= intersection_top:
+        return 0.0
+    intersection = (intersection_right - intersection_left) * (intersection_bottom - intersection_top)
+    smaller_area = min(left.width * left.height, right.width * right.height)
+    return intersection / max(smaller_area, 1)
 
 
 def line_positions(image: np.ndarray, axis: int) -> list[int]:

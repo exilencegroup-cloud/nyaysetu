@@ -87,6 +87,7 @@ interface InternalOcrResponse {
   height: number;
   lines: InternalOcrLine[];
   tables?: InternalOcrTable[];
+  marks?: InternalOcrMark[];
 }
 
 interface InternalOcrTableCell {
@@ -98,6 +99,14 @@ interface InternalOcrTableCell {
 
 interface InternalOcrTable {
   cells: InternalOcrTableCell[];
+}
+
+interface InternalOcrMark {
+  kind: 'signature' | 'seal';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 interface PdfPageImage {
@@ -1202,6 +1211,7 @@ function internalOcrResponseToLayout(raw: unknown): OcrLayout {
   const sourceHeight = Number(response.height);
   const lines = Array.isArray(response.lines) ? response.lines : [];
   const tables = Array.isArray(response.tables) ? response.tables : [];
+  const marks = Array.isArray(response.marks) ? response.marks : [];
 
   if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) || sourceWidth <= 0 || sourceHeight <= 0) {
     throw new Error('Internal OCR worker returned invalid page geometry.');
@@ -1240,6 +1250,22 @@ function internalOcrResponseToLayout(raw: unknown): OcrLayout {
     const height = clamp(Math.round(cell.height * scale), 1, pageHeight - top);
     return `<div style="position:absolute;left:${left}px;top:${top}px;width:${width}px;height:${height}px;border:1px solid #64748b;box-sizing:border-box"></div>`;
   }).join('');
+  const positionedMarks = marks
+    .map((mark) => ({
+      kind: mark?.kind === 'signature' || mark?.kind === 'seal' ? mark.kind : '',
+      x: Number(mark?.x),
+      y: Number(mark?.y),
+      width: Number(mark?.width),
+      height: Number(mark?.height),
+    }))
+    .filter((mark) => mark.kind && [mark.x, mark.y, mark.width, mark.height].every(Number.isFinite));
+  const markHtml = positionedMarks.map((mark) => {
+    const left = clamp(Math.round(mark.x * scale), 0, pageWidth);
+    const top = clamp(Math.round(mark.y * scale), 0, pageHeight);
+    const fontSize = clamp(Math.round(Math.max(mark.height * scale * 0.7, 10)), 10, 16);
+    const label = mark.kind === 'signature' ? '(Signature)' : '(Seal)';
+    return `<span style="position:absolute;left:${left}px;top:${top}px;font-size:${fontSize}px;font-weight:600;line-height:1.2;white-space:pre">${label}</span>`;
+  }).join('');
   const lineHtml = positionedLines.map((line) => {
     const left = clamp(Math.round(line.x * scale), 0, pageWidth);
     const top = clamp(Math.round(line.y * scale), 0, pageHeight);
@@ -1250,7 +1276,7 @@ function internalOcrResponseToLayout(raw: unknown): OcrLayout {
 
   return {
     text,
-    layoutHtml: sanitizeLayoutHtml(`<div style="position:relative;width:${pageWidth}px;min-height:${pageHeight}px">${tableHtml}${lineHtml}</div>`),
+    layoutHtml: sanitizeLayoutHtml(`<div style="position:relative;width:${pageWidth}px;min-height:${pageHeight}px">${tableHtml}${lineHtml}${markHtml}</div>`),
   };
 }
 
