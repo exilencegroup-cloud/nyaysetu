@@ -452,7 +452,7 @@ async function extractImagePage(filePath: string, extension: string): Promise<Ty
       pageNumber: 1,
       text: layout.text,
       layoutHtml: layout.layoutHtml,
-      status: layout.text ? 'ocr' : 'not_readable',
+      status: isUsableOcrText(layout.text) ? 'ocr' : 'not_readable',
     },
   ];
 }
@@ -500,7 +500,7 @@ async function ocrUnreadablePdfPages(
         if (layout.text) {
           page.text = layout.text;
           page.layoutHtml = layout.layoutHtml;
-          page.status = 'ocr';
+          page.status = isUsableOcrText(layout.text) ? 'ocr' : 'not_readable';
         }
       } catch (error) {
         if (isOpenAiQuotaError(error) || isOpenAiRateLimitError(error)) throw error;
@@ -539,7 +539,7 @@ async function ocrUnreadablePdfPageImages(buffer: Buffer, pages: TypeCopyPage[])
         if (layout.text) {
           page.text = layout.text;
           page.layoutHtml = layout.layoutHtml;
-          page.status = 'ocr';
+          page.status = isUsableOcrText(layout.text) ? 'ocr' : 'not_readable';
         }
       } catch (error) {
         if (isOpenAiQuotaError(error) || isOpenAiRateLimitError(error)) throw error;
@@ -916,6 +916,9 @@ async function ocrPdfViaFileInput(pdfPath: string, fileName: string, pages: Type
           page.text = text;
           page.layoutHtml = layout?.layoutHtml || textToLayoutHtml(text);
           page.status = 'ocr';
+        } else if (isNotReadableText(text)) {
+          page.text = text;
+          page.layoutHtml = unreadableLayout().layoutHtml;
         }
       }
     }
@@ -958,9 +961,11 @@ async function transcribePdfPageRange(fileId: string, fileName: string, pageNumb
       'Use text-align:center/right, margin-left, and table cell padding/borders to preserve headings, dates, signature blocks, and indentation.',
       'Do not flatten everything into left-aligned paragraphs. The layoutHtml must visually mimic the page.',
       'Do not return body, html, style, script, markdown, or code fences.',
-      'Mark unreadable words as (Not Readable).',
+      'Perform a final visual audit before responding: look specifically for signatures, seals, stamps, handwritten notes, strike-throughs, faded text, and text covered by handwriting or a stamp.',
+      'For every visible handwritten signature or signature-like mark that cannot be read as words, output (Signature) at its visual location. Never omit a visible signature because it is not legible.',
+      'For every visible seal or stamp whose wording cannot be read, output (Seal) or (Stamp) at its visual location. Never omit it.',
+      'Mark every unreadable word, character sequence, filled value, handwriting, or covered text as (Not Readable) exactly where it appears. Do not skip it, replace it with a guess, or move following text into its place.',
       'If one table cell is unreadable, mark only that cell as (Not Readable).',
-      'Represent stamps, seals, and signatures as short markers such as (Seal) or (Signature).',
       'If you cannot confidently transcribe meaningful visible text for a page, set that page to (Not Readable) instead of guessing.',
       'Do not return blank JSON, newline-only content, escape-sequence padding, or one-letter placeholders.',
       'Use only meaningful line breaks; do not use repeated escaped newlines to imitate vertical spacing.',
@@ -978,7 +983,7 @@ async function transcribePdfPageRange(fileId: string, fileName: string, pageNumb
               'Return a JSON object with this exact shape:',
               '{"pages":[{"pageNumber":1,"plainText":"...","layoutHtml":"..."}]}',
               'Return the requested pages in order.',
-              'If a requested page has no readable text, set plainText to "(Not Readable)" and layoutHtml to "<p>(Not Readable)</p>".',
+              'If a requested page has no readable text, set plainText to "(Not Readable)" and layoutHtml to "<p style=\"text-align:left\">(Not Readable)</p>".',
               'Never fill plainText or layoutHtml with repeated \\n characters or placeholder letters.',
             ].join(' '),
           },
@@ -1067,11 +1072,13 @@ async function ocrImageBuffer(
           'Use text-align:center/right, margin-left, and table cell padding/borders to preserve headings, dates, signature blocks, and indentation.',
           'Do not flatten everything into left-aligned paragraphs. The layoutHtml must visually mimic the page.',
           'Do not return body, html, style, script, markdown, or code fences.',
-          'Mark unreadable words as (Not Readable).',
+          'Perform a final visual audit before responding: look specifically for signatures, seals, stamps, handwritten notes, strike-throughs, faded text, and text covered by handwriting or a stamp.',
+          'For every visible handwritten signature or signature-like mark that cannot be read as words, output (Signature) at its visual location. Never omit a visible signature because it is not legible.',
+          'For every visible seal or stamp whose wording cannot be read, output (Seal) or (Stamp) at its visual location. Never omit it.',
+          'Mark every unreadable word, character sequence, filled value, handwriting, or covered text as (Not Readable) exactly where it appears. Do not skip it, replace it with a guess, or move following text into its place.',
           'If one table cell is unreadable, mark only that cell as (Not Readable).',
-          'Represent stamps, seals, and signatures as short markers such as (Seal) or (Signature).',
-          'If no text is visible, return {"plainText":"(Not Readable)","layoutHtml":"<p>(Not Readable)</p>"}.',
-          'If you cannot confidently transcribe meaningful visible text, return {"plainText":"(Not Readable)","layoutHtml":"<p>(Not Readable)</p>"} instead of guessing.',
+          'If no text is visible, return {"plainText":"(Not Readable)","layoutHtml":"<p style=\"text-align:left\">(Not Readable)</p>"}.',
+          'If you cannot confidently transcribe meaningful visible text, return {"plainText":"(Not Readable)","layoutHtml":"<p style=\"text-align:left\">(Not Readable)</p>"} instead of guessing.',
           'Do not return blank JSON, newline-only content, escape-sequence padding, or one-letter placeholders.',
           'Use only meaningful line breaks; do not use repeated escaped newlines to imitate vertical spacing.',
         ].join(' '),
@@ -1114,6 +1121,10 @@ async function ocrImageBuffer(
 
   const content = completion.choices[0]?.message?.content || '';
   const parsed = parseOcrLayout(content);
+
+  if (isNotReadableText(parsed.text)) {
+    return unreadableLayout();
+  }
 
   if (!isUsableOcrText(parsed.text)) {
     return { text: '', layoutHtml: '' };
@@ -1232,6 +1243,13 @@ function isNotReadableText(text: string) {
   return /^\(?not\s+readable\)?$/i.test(normalizeExtractedText(text));
 }
 
+function unreadableLayout(): OcrLayout {
+  return {
+    text: '(Not Readable)',
+    layoutHtml: '<p style="text-align:left">(Not Readable)</p>',
+  };
+}
+
 function isUsableOcrText(text: string) {
   const normalized = normalizeExtractedText(text);
   if (!normalized || isNotReadableText(normalized)) return false;
@@ -1249,6 +1267,7 @@ function parseOcrLayout(raw: string): OcrLayout {
   try {
     const parsed = JSON.parse(stripped);
     const text = normalizeExtractedText(parsed.plainText || parsed.text || '');
+    if (isNotReadableText(text)) return unreadableLayout();
     if (!isUsableOcrText(text)) return { text: '', layoutHtml: '' };
 
     const layoutHtml = sanitizeLayoutHtml(parsed.layoutHtml || '');
@@ -1282,6 +1301,11 @@ function parseOcrLayoutPages(raw: string, fallbackPageNumbers: number[]) {
       if (!fallbackPageNumbers.includes(pageNumber)) continue;
 
       const text = normalizeExtractedText(page.plainText || page.text || '');
+      if (isNotReadableText(text)) {
+        pages.set(pageNumber, unreadableLayout());
+        continue;
+      }
+
       if (!isUsableOcrText(text)) continue;
 
       const layoutHtml = sanitizeLayoutHtml(page.layoutHtml || '');
