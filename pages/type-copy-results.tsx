@@ -61,11 +61,32 @@ export default function TypeCopyResultsPage() {
   }, []);
 
   useEffect(() => {
+    if (!activeJob?.remote || !result) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/type-copy-job?jobId=${encodeURIComponent(activeJob.jobId)}`);
+        const payload = await response.json();
+        if (!response.ok || !payload.success || cancelled) return;
+        await saveTypeCopyResult(payload.data);
+        setResult(payload.data);
+        setMessage(payload.data.processing?.message || '');
+        if (payload.data.processing?.status === 'complete' || payload.data.processing?.status === 'failed') setActiveJob(null);
+      } catch {
+        // Keep the last persisted state visible while the workflow retries.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 2500);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [activeJob?.jobId, activeJob?.remote, result]);
+
+  useEffect(() => {
     draftDirtyRef.current = draftDirty;
   }, [draftDirty]);
 
   useEffect(() => {
-    if (loading || !result || !activeJob || runnerActiveRef.current) return;
+    if (loading || !result || !activeJob || activeJob.remote || runnerActiveRef.current) return;
     if (activeJob.status === 'complete' || activeJob.status === 'failed') return;
 
     let cancelled = false;
