@@ -1296,7 +1296,7 @@ function internalOcrResponseToLayout(raw: unknown): OcrLayout {
 
   if (positionedLines.length === 0) return unreadableLayout();
 
-  const text = positionedLines.map((line) => line.text).join('\n');
+  const text = reconstructPositionedText(positionedLines);
   const positionedCells = tables
     .flatMap((table) => Array.isArray(table?.cells) ? table.cells : [])
     .map((cell) => ({
@@ -1450,12 +1450,36 @@ function mimeTypeForExtension(extension: string) {
 function normalizeExtractedText(text: string) {
   const cleaned = text
     .replace(/\r\n?/g, '\n')
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/^\n+|\n+$/g, '');
+    // Keep tabs, repeated spaces, punctuation, and blank lines exactly as OCR
+    // returned them. These can carry legal-document spacing and separator intent.
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
 
   return cleaned.trim().length ? cleaned : '';
+}
+
+function reconstructPositionedText(lines: Array<{ text: string; y: number; height: number }>) {
+  if (lines.length === 0) return '';
+
+  const lineHeights = lines
+    .map((line) => line.height)
+    .filter((height) => Number.isFinite(height) && height > 0)
+    .sort((left, right) => left - right);
+  const medianHeight = lineHeights[Math.floor(lineHeights.length / 2)] || 1;
+  const normalLinePitch = Math.max(medianHeight * 1.35, 1);
+  let previous = lines[0];
+  let text = previous.text;
+
+  for (const line of lines.slice(1)) {
+    const verticalGap = line.y - previous.y;
+    const newlineCount = verticalGap > normalLinePitch * 1.6
+      ? Math.max(2, Math.round(verticalGap / normalLinePitch))
+      : 1;
+
+    text += `${'\n'.repeat(newlineCount)}${line.text}`;
+    previous = line;
+  }
+
+  return text;
 }
 
 function looksLikeStructuredOcrJson(raw: string) {
